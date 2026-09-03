@@ -1,0 +1,15 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { productionState,validateProductionEvent,validateFormValues,readExecutionGuide,type ExecutionGuide,type ProductionEvent } from "./task-execution";
+import { eventsFrom,readRecords } from "./task-records";
+const event=(event:ProductionEvent["event"],at:string,quantity=0):ProductionEvent=>({event,at,order:"104",product:"Porta",quantity,note:event==="PAUSE"?"Material":""});
+const timeline=[event("START","2026-08-31T08:00:00Z"),event("PAUSE","2026-08-31T08:10:00Z"),event("RESUME","2026-08-31T08:15:00Z"),event("OUTPUT","2026-08-31T08:25:00Z",8),event("FINISH","2026-08-31T08:30:00Z")];
+test("tempo de posto separa paradas e aceita saídas em grupo",()=>{assert.deepEqual(productionState(timeline),{mode:"IDLE",order:"104",product:"Porta",quantity:8,workMinutes:25,pauseMinutes:5});});
+test("não registra saída sem iniciar lote",()=>assert.throws(()=>validateProductionEvent([],event("OUTPUT","",3))));
+test("não abre dois lotes no mesmo posto",()=>assert.throws(()=>validateProductionEvent(timeline.slice(0,1),event("START",""))));
+test("parada precisa de motivo e saída precisa de quantidade",()=>{assert.throws(()=>validateProductionEvent(timeline.slice(0,1),{...event("PAUSE",""),note:""}));assert.throws(()=>validateProductionEvent(timeline.slice(0,1),event("OUTPUT","",0)));});
+test("eventos posteriores pertencem ao lote aberto",()=>{const result=validateProductionEvent(timeline.slice(0,1),{...event("OUTPUT","",2),order:"outro"});assert.equal(result.order,"104");});
+test("correção exclui evento do cálculo sem apagar auditoria",()=>{const rows=timeline.map((e,i)=>({id:String(i),metadata:{kind:"PRODUCTION_EVENT",at:e.at,event:e,voided:e.event==="OUTPUT"}}));assert.equal(productionState(eventsFrom(readRecords(rows))).quantity,0);});
+const guide:ExecutionGuide={steps:[{title:"A",instruction:"Registrar os lotes",doneWhen:"Registro completo"},{title:"B",instruction:"Conferir o registro",doneWhen:"Registro conferido"}],recording:{kind:"FORM",title:"Registro",unit:"peças",instructions:"Anotar quantidade observada",fields:[{key:"quantity",label:"Quantidade",hint:"Somente observado",example:"3",type:"NUMBER",required:true}]},completionCriteria:"Registro completo",improvementCriteria:"Comparar períodos equivalentes",reviewQuestion:"O que mudou?"};
+test("formulário valida obrigatórios, números e descarta campos extras",()=>{assert.throws(()=>validateFormValues(guide,{}));assert.throws(()=>validateFormValues(guide,{quantity:-1}));assert.throws(()=>validateFormValues(guide,{quantity:"abc"}));assert.deepEqual(validateFormValues(guide,{quantity:0,unknown:"x"}),{quantity:"0"});});
+test("tarefas antigas não exigem guia novo",()=>{assert.equal(readExecutionGuide(null),null);assert.ok(readExecutionGuide(guide));});

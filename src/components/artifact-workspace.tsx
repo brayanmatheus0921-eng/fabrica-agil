@@ -1,0 +1,100 @@
+"use client";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, Download, FileText, FolderOpen, LoaderCircle, Plus, Save, Upload, WandSparkles } from "lucide-react";
+import type { ArtifactView, CanvasContent, Interpretation } from "@/core/workspace-artifacts";
+
+async function payload(response: Response) {
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error ?? "Não foi possível concluir. Tente novamente.");
+  return data;
+}
+const inputClass = "w-full min-w-0 rounded-lg border bg-white p-2.5 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary";
+const buttonClass = "inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border bg-white px-3 py-2 text-xs font-semibold disabled:opacity-50";
+
+export function ArtifactWorkspace({ taskId, threadId, refreshKey = 0, openArtifactId, onDirtyChange }: { taskId?: string; threadId?: string; refreshKey?: number; openArtifactId?: string; onDirtyChange?: (dirty: boolean) => void }) {
+  const [artifacts, setArtifacts] = useState<ArtifactView[]>([]), [selected, setSelected] = useState<string | null>(null);
+  const [tasks, setTasks] = useState<Array<{ id: string; title: string }>>([]), [targetTask, setTargetTask] = useState(taskId ?? "");
+  const [prompt, setPrompt] = useState(""), [busy, setBusy] = useState(""), [notice, setNotice] = useState("");
+  const dirty = useRef(false), lock = useRef(false), fileInput = useRef<HTMLInputElement>(null);
+  function markDirty(value: boolean) { dirty.current = value; onDirtyChange?.(value); }
+  const query = new URLSearchParams(taskId ? { taskId } : threadId ? { threadId } : {}).toString();
+  useEffect(() => {
+    let valid = true;
+    fetch(`/api/artifacts?${query}`).then(payload).then(data => { if (valid) { setArtifacts(data.artifacts); setTasks(data.tasks); if (openArtifactId && !dirty.current) { setSelected(openArtifactId); if (!taskId) setTargetTask(data.artifacts.find((a: ArtifactView) => a.id === openArtifactId)?.taskId ?? ""); } } }).catch(() => { if (valid) setNotice("Não consegui carregar os arquivos. Reabra esta área para tentar novamente."); });
+    return () => { valid = false; };
+  }, [query, refreshKey, openArtifactId, taskId]);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => { if (dirty.current || lock.current) event.preventDefault(); };
+    window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn);
+  }, []);
+  function select(id: string | null) { if (dirty.current && !window.confirm("Descartar as alterações ainda não salvas?")) return; markDirty(false); setSelected(id); if (id && !taskId) setTargetTask(artifacts.find(a => a.id === id)?.taskId ?? ""); }
+  function updated(artifact: ArtifactView) { setArtifacts(old => [artifact, ...old.filter(a => a.id !== artifact.id)]); setSelected(artifact.id); markDirty(false); }
+  async function operation(label: string, work: () => Promise<void>) {
+    if (lock.current) return; lock.current = true; setBusy(label); setNotice("");
+    try { await work(); } catch (e) { setNotice(e instanceof Error ? e.message : "Não foi possível concluir."); }
+    finally { lock.current = false; setBusy(""); }
+  }
+  async function generate() {
+    if (!prompt.trim() || dirty.current) { if (dirty.current) setNotice("Salve suas alterações antes de criar outra ferramenta."); return; }
+    await operation("Criando ferramenta…", async () => {
+      const data = await payload(await fetch("/api/artifacts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, taskId: targetTask || undefined, threadId }) }));
+      updated(data.artifact); setPrompt("");
+      if (data.reused) setNotice("Essa ferramenta já existia. Abri a versão salva para evitar uma cópia repetida.");
+    });
+  }
+  async function upload(file: File) {
+    if (!targetTask) { setNotice("Escolha a tarefa que receberá o arquivo."); return; }
+    if (dirty.current) { setNotice("Salve suas alterações antes de anexar um arquivo."); return; }
+    if (file.size > 5 * 1024 * 1024) { setNotice("Envie um arquivo de até 5 MB."); return; }
+    await operation("Salvando e lendo o arquivo…", async () => {
+      const form = new FormData(); form.set("file", file); form.set("taskId", targetTask); if (threadId) form.set("threadId", threadId);
+      const saved = await payload(await fetch("/api/artifacts", { method: "POST", body: form })); updated(saved.artifact);
+      if (saved.reused) { setNotice("Esse arquivo já estava salvo nesta tarefa. Reutilizei o original."); return; }
+      const read = await payload(await fetch(`/api/artifacts/${saved.artifact.id}/interpret`, { method: "POST" })); updated(read.artifact);
+    });
+  }
+  const current = artifacts.find(a => a.id === selected);
+  return <div className="min-w-0 space-y-5">
+    <div className="flex items-start justify-between gap-3"><div><h2 className="text-base font-semibold">Ferramentas e arquivos</h2><p className="mt-1 max-w-md text-xs leading-5 text-muted">Crie, preencha ou envie um arquivo. Ao ligá-lo a uma tarefa, o resultado fica salvo junto do plano.</p></div><span className="shrink-0 rounded-full bg-surface-muted px-2.5 py-1 text-[10px] font-semibold text-muted">{artifacts.length} salvo{artifacts.length === 1 ? "" : "s"}</span></div>
+    {notice ? <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{notice}</p> : null}
+    {busy ? <p role="status" className="flex items-center gap-2 text-sm text-muted"><LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />{busy}</p> : null}
+    {!taskId ? <details open className="group rounded-xl border bg-white"><summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4"><span><span className="block text-sm font-semibold">1. Onde este arquivo ficará salvo?</span><span className="mt-1 block text-xs leading-5 text-muted">Escolha a tarefa para manter arquivo, execução e resultado no mesmo lugar.</span></span><ChevronDown className="size-4 shrink-0 transition group-open:rotate-180" /></summary><div className="border-t p-4"><label className="block text-xs font-semibold">Tarefa vinculada<select aria-label="Tarefa vinculada" className={`${inputClass} mt-2`} value={targetTask} disabled={Boolean(busy)} onChange={e => setTargetTask(e.target.value)}><option value="">Sem tarefa — selecionar depois</option>{tasks.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select></label><p className="mt-2 text-xs leading-5 text-muted">Você pode criar sem tarefa e vincular depois.</p></div></details> : null}
+    {!current ? <>
+      <details open className="group rounded-xl border bg-surface-muted/30"><summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4"><span className="flex items-start gap-3"><WandSparkles className="mt-0.5 size-4 shrink-0 text-primary"/><span><span className="block text-sm font-semibold">2. Criar ou enviar</span><span className="mt-1 block text-xs leading-5 text-muted">Peça uma ferramenta nova ou envie uma já preenchida.</span></span></span><ChevronDown className="size-4 shrink-0 transition group-open:rotate-180" /></summary><div className="border-t p-4"><label className="block text-sm font-semibold" htmlFor={`tool-prompt-${taskId ?? threadId}`}>O que você precisa para executar a tarefa?</label><textarea id={`tool-prompt-${taskId ?? threadId}`} value={prompt} maxLength={2000} onChange={e => setPrompt(e.target.value)} placeholder="Ex.: uma planilha simples para anotar as paradas da lixa" rows={3} className={`${inputClass} mt-2 resize-y`} /><div className="mt-3 grid gap-2 sm:grid-cols-2"><button className={`${buttonClass} !bg-primary text-white`} disabled={Boolean(busy) || !prompt.trim()} onClick={generate}><Plus className="size-4" />Criar com o COO</button><button className={buttonClass} disabled={Boolean(busy)} onClick={() => { if (!targetTask) setNotice("Escolha uma tarefa antes de anexar."); else fileInput.current?.click(); }}><Upload className="size-4" />Enviar arquivo preenchido</button></div><p className="mt-2 text-xs leading-5 text-muted">Formatos aceitos: CSV, XLSX, DOCX, JPG ou PNG · até 5 MB. O COO mostra o que entendeu antes de usar os dados.</p></div></details>
+      <section aria-labelledby="saved-artifacts-title"><div className="mb-3 flex items-center gap-2"><FolderOpen className="size-4 text-primary"/><h3 id="saved-artifacts-title" className="text-sm font-semibold">Arquivos salvos</h3></div><div className="space-y-2">{artifacts.map(a => <button key={a.id} disabled={Boolean(busy)} onClick={() => select(a.id)} className="flex w-full min-w-0 items-start gap-3 rounded-xl border bg-white p-4 text-left transition hover:border-primary/30 hover:bg-surface-muted/40"><FileText className="mt-0.5 size-4 shrink-0 text-primary" /><span className="min-w-0"><span className="block break-words text-sm font-semibold">{a.title}</span><span className="mt-1 block text-xs leading-5 text-muted">{a.kind === "UPLOAD" ? "Arquivo enviado" : a.kind === "SPREADSHEET" ? "Planilha editável" : "Documento editável"} · {a.confirmedAt ? "Pronto para acompanhamento" : a.interpretation ? "Aguardando sua conferência" : "Salvo"}</span></span></button>)}{!artifacts.length ? <div className="rounded-xl border border-dashed p-5 text-center"><p className="text-sm font-medium">Nenhum arquivo salvo ainda</p><p className="mt-1 text-xs leading-5 text-muted">Crie uma ferramenta acima ou peça ao COO durante a conversa.</p></div> : null}</div></section>
+    </> : <>
+      <button className={buttonClass} disabled={Boolean(busy)} onClick={() => select(null)}>← Todos os arquivos</button>
+      <ArtifactEditor key={`${current.id}-${current.revision}`} artifact={current} targetTask={targetTask} busy={Boolean(busy)} onDirty={markDirty} onSave={async (content) => operation("Salvando…", async () => { const data = await payload(await fetch(`/api/artifacts/${current.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ intent: "SAVE", revision: current.revision, content }) })); updated(data.artifact); setNotice("Alterações salvas."); })} onConfirm={async (interpretation) => operation("Confirmando leitura…", async () => { const data = await payload(await fetch(`/api/artifacts/${current.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ intent: "CONFIRM", revision: current.revision, interpretation }) })); updated(data.artifact); setNotice("Leitura confirmada. Os dados já aparecem no acompanhamento."); })} onInterpret={async () => {
+        if (dirty.current) { setNotice("Salve suas alterações antes de interpretar."); return; }
+        await operation("Interpretando dados…", async () => { const data = await payload(await fetch(`/api/artifacts/${current.id}/interpret`, { method: "POST" })); updated(data.artifact); });
+      }} onLink={async () => operation("Vinculando à tarefa…", async () => { const data = await payload(await fetch(`/api/artifacts/${current.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ intent: "LINK", revision: current.revision, taskId: targetTask }) })); updated(data.artifact); })} />
+    </>}
+    <input ref={fileInput} type="file" accept=".csv,.xlsx,.docx,.jpg,.jpeg,.png" aria-label="Arquivo preenchido" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) void upload(file); e.target.value = ""; }} />
+  </div>;
+}
+
+function ArtifactEditor({ artifact, targetTask, busy, onDirty, onSave, onConfirm, onInterpret, onLink }: {
+  artifact: ArtifactView; targetTask: string; busy: boolean; onDirty: (value: boolean) => void;
+  onSave: (content: CanvasContent) => Promise<void>; onConfirm: (value: Interpretation) => Promise<void>; onInterpret: () => Promise<void>; onLink: () => Promise<void>;
+}) {
+  const [content, setContent] = useState(artifact.content), [interpretation, setInterpretation] = useState(artifact.interpretation), [dirty, setDirty] = useState(false);
+  function change(value: CanvasContent) { setContent(value); setDirty(true); onDirty(true); }
+  function changeReading(value: Interpretation) { setInterpretation(value); onDirty(true); }
+  return <fieldset disabled={busy} className="min-w-0 space-y-4">
+    {content ? <>
+      <section aria-labelledby="artifact-about-title" className="rounded-xl border p-4"><h3 id="artifact-about-title" className="text-sm font-semibold">Sobre esta ferramenta</h3><label className="mt-3 block text-xs font-semibold">Título<input aria-label="Título da ferramenta" className={`${inputClass} mt-1`} maxLength={160} value={content.title} onChange={e => change({ ...content, title: e.target.value })} /></label><p className="mt-3 text-sm leading-6 text-muted">{content.purpose}</p></section>
+      <details open className="group rounded-xl bg-[#f0f4f8]"><summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4"><span><span className="block text-sm font-semibold">Como preencher</span><span className="mt-1 block text-xs text-muted">Abra quando precisar consultar as orientações.</span></span><ChevronDown className="size-4 shrink-0 transition group-open:rotate-180"/></summary><p className="border-t border-[#dce3ea] px-4 py-3 whitespace-pre-line text-sm leading-6">{content.instructions}</p></details>
+      <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-semibold">Preenchimento</h3>{content.kind === "SPREADSHEET" ? <span className="text-xs text-muted">{content.rows.length} registro{content.rows.length === 1 ? "" : "s"}</span> : null}</div>
+      {content.kind === "DOCUMENT" ? content.sections.map((s, i) => <label key={i} className="block text-sm font-semibold">{s.heading}<textarea aria-label={s.heading} className={`${inputClass} mt-2 font-normal`} rows={4} maxLength={5000} value={s.body} onChange={e => change({ ...content, sections: content.sections.map((section, j) => j === i ? { ...section, body: e.target.value } : section) })} /></label>) : <>
+        {content.example.length ? <details className="rounded-lg border p-3 text-xs"><summary className="cursor-pointer font-semibold">Exemplo de preenchimento — dados fictícios</summary><dl className="mt-2 space-y-2">{content.columns.map((col, i) => <div key={i}><dt className="text-muted">{col}</dt><dd>{content.example[i]}</dd></div>)}</dl></details> : null}
+        <p className="text-xs text-muted">Registros reais · {content.rows.length} linhas. Em telas pequenas, deslize a tabela para o lado.</p>
+        <div className="relative max-w-full overflow-x-auto rounded-lg border"><table className="w-full text-sm"><thead className="bg-surface-muted"><tr>{content.columns.map((col, i) => <th key={i} scope="col" className="min-w-36 p-3 text-left font-semibold">{col}</th>)}<th className="px-2" aria-label="Remover linha" /></tr></thead><tbody>{content.rows.map((row, i) => <tr key={i} className="border-t">{row.map((cell, j) => <td key={j} className="p-1"><input aria-label={`${content.columns[j]}, linha ${i + 1}`} value={cell} maxLength={1500} className="w-full min-w-32 rounded border border-transparent p-2 focus:border-primary focus:outline-none" onChange={e => change({ ...content, rows: content.rows.map((r, k) => k === i ? r.map((v, c) => c === j ? e.target.value : v) : r) })} /></td>)}<td><button type="button" aria-label={`Remover linha ${i + 1}`} className="p-2 text-muted" onClick={() => change({ ...content, rows: content.rows.filter((_, k) => k !== i) })}>×</button></td></tr>)}</tbody></table></div>
+        <button className={buttonClass} disabled={busy || content.rows.length >= 200} onClick={() => change({ ...content, rows: [...content.rows, content.columns.map(() => "")] })}><Plus className="size-4" />Adicionar registro</button>
+      </>}
+      <section aria-label="Salvar e baixar" className="border-t pt-4"><p className="mb-3 text-xs font-semibold text-muted">SALVAR OU BAIXAR</p><div className="flex flex-wrap gap-2"><button className={`${buttonClass} !bg-primary text-white`} disabled={busy || !dirty} onClick={() => onSave(content)}><Save className="size-4" />Salvar alterações</button>{(content.kind === "DOCUMENT" ? ["docx"] : ["xlsx", "csv"]).map(format => <a key={format} aria-disabled={dirty || busy} onClick={e => { if (dirty || busy) e.preventDefault(); }} href={`/api/artifacts/${artifact.id}/download?format=${format}`} className={`${buttonClass} ${dirty || busy ? "opacity-40" : ""}`}><Download className="size-4" />Baixar {format.toUpperCase()}</a>)}</div></section>
+      {dirty ? <p role="status" className="text-xs text-amber-800">Alterações ainda não salvas. Salve antes de baixar ou interpretar.</p> : null}
+    </> : <div><h3 className="break-words text-base font-semibold">{artifact.title}</h3><a href={`/api/artifacts/${artifact.id}/download`} className={`${buttonClass} mt-3`}><Download className="size-4" />Baixar original</a></div>}
+    {!artifact.taskId ? <div className="rounded-lg border p-3"><p className="text-xs text-muted">Vincule a uma tarefa para acompanhar os resultados.</p><button className={`${buttonClass} mt-2`} disabled={busy || !targetTask || dirty} onClick={onLink}>Vincular à tarefa selecionada</button></div> : <button className={buttonClass} disabled={busy || dirty} onClick={onInterpret}>{artifact.interpretation ? "Ler novamente com o COO" : "Interpretar dados com o COO"}</button>}
+    {interpretation ? <details open={!artifact.confirmedAt} className="group rounded-xl border"><summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4"><span><span className="block text-sm font-semibold">{artifact.confirmedAt ? "Leitura confirmada por você" : "3. Confira o que o COO entendeu"}</span><span className="mt-1 block text-xs text-muted">Revise antes de levar estes dados ao acompanhamento.</span></span><ChevronDown className="size-4 shrink-0 transition group-open:rotate-180"/></summary><section className="border-t p-4"><p className="text-xs leading-5 text-muted">Você pode corrigir os valores abaixo. O arquivo original será preservado.</p><label className="mt-3 block text-xs font-semibold">Resumo<textarea aria-label="Resumo da leitura" className={`${inputClass} mt-1 font-normal`} rows={3} maxLength={2000} value={interpretation.summary} onChange={e => changeReading({ ...interpretation, summary: e.target.value })} /></label><div className="mt-3 space-y-3">{interpretation.observations.map((o, i) => <div key={i} className="border-t pt-3"><label className="block text-xs font-semibold">{o.label}<textarea aria-label={o.label} rows={2} maxLength={1200} className={`${inputClass} mt-1 font-normal`} value={o.value} onChange={e => changeReading({ ...interpretation, observations: interpretation.observations.map((v, j) => i === j ? { ...v, value: e.target.value } : v) })} /></label><p className="mt-1 text-xs text-muted">Origem: {o.source}</p><button className="mt-1 text-xs text-red-700" onClick={() => changeReading({ ...interpretation, observations: interpretation.observations.filter((_, j) => i !== j) })}>Desconsiderar este item</button></div>)}</div>{interpretation.uncertainties.length ? <div className="mt-4 rounded-lg bg-amber-50 p-3"><p className="text-xs font-semibold text-amber-900">Pontos ainda incertos</p><ul className="mt-2 list-disc space-y-1 pl-4 text-sm">{interpretation.uncertainties.map((u, i) => <li key={i}>{u}</li>)}</ul><p className="mt-2 text-xs text-muted">Confirmar os registros não transforma estes pontos em fatos.</p></div> : null}<div className="mt-4 rounded-lg bg-surface-muted/50 p-3"><p className="text-xs font-semibold">Sugestão do COO</p><p className="mt-1 text-sm leading-6">{interpretation.recommendation}</p></div><button disabled={busy || dirty || !artifact.taskId} className={`${buttonClass} mt-4 !bg-primary text-white`} onClick={() => onConfirm(interpretation)}>Confirmar leitura para acompanhamento</button></section></details> : null}
+  </fieldset>;
+}

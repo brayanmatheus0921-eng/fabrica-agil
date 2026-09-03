@@ -1,0 +1,645 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MembershipRole {
+  OWNER
+  MANAGER
+  CONSULTANT
+  ADMIN
+}
+
+enum OnboardingStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum PublicationStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum DiagnosticStatus {
+  DRAFT
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum DiagnosticDomain {
+  ENTERPRISE
+  OPERATIONS
+  COMMERCIAL
+  FINANCE
+}
+
+enum AnswerType {
+  TEXT
+  NUMBER
+  BOOLEAN
+  SINGLE_SELECT
+  MULTI_SELECT
+  SCALE
+}
+
+enum BottleneckStatus {
+  ACTIVE
+  MONITORING
+  RESOLVED
+  DISMISSED
+}
+
+enum RecommendationStatus {
+  PROPOSED
+  ACCEPTED
+  REJECTED
+  SUPERSEDED
+}
+
+enum ActionPlanStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  IN_REVIEW
+  DONE
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum LessonProgressStatus {
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  SKIPPED
+}
+
+enum CheckinStatus {
+  OPEN
+  SUBMITTED
+  REVIEWED
+}
+
+enum ConversationStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+  TOOL
+}
+
+enum MemoryKind {
+  FACT
+  DECISION
+  ASSUMPTION
+  OUTCOME
+  PREFERENCE
+}
+
+enum MemorySourceType {
+  ONBOARDING
+  DIAGNOSTIC
+  CONVERSATION
+  TASK
+  CHECKIN
+  MANUAL
+  SYSTEM
+}
+
+enum EvidenceType {
+  NOTE
+  NUMBER
+  LINK
+  FILE
+  PHOTO
+}
+
+enum MetricDirection {
+  INCREASE
+  DECREASE
+  MAINTAIN
+}
+
+model User {
+  id               String                @id @default(cuid())
+  name             String?
+  email            String                @unique
+  memberships      CompanyMembership[]
+  assignedLessons  LessonAssignment[]
+  authoredMessages ConversationMessage[]
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+}
+
+model Company {
+  artifacts         WorkspaceArtifact[]
+  id                String                 @id @default(cuid())
+  name              String
+  legalName         String?
+  sector            String?
+  productionType    String?
+  teamSize          Int?
+  onboardingStatus  OnboardingStatus       @default(NOT_STARTED)
+  onboardingData    Json?
+  memberships       CompanyMembership[]
+  diagnostics       DiagnosticSession[]
+  bottlenecks       BottleneckAssessment[]
+  recommendations   MethodRecommendation[]
+  actionPlans       ActionPlan[]
+  tasks             Task[]
+  lessonAssignments LessonAssignment[]
+  checkins           ProgressCheckin[]
+  evidence           EvidenceOutput[]
+  conversations      ConversationThread[]
+  memories           CompanyMemory[]
+  metrics            MetricDefinition[]
+  measurements       MetricMeasurement[]
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+}
+
+model CompanyMembership {
+  id                String            @id @default(cuid())
+  companyId         String
+  userId            String
+  role              MembershipRole    @default(MANAGER)
+  company           Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedTasks     Task[]            @relation("TaskAssignee")
+  submittedCheckins ProgressCheckin[] @relation("CheckinSubmitter")
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@unique([companyId, userId])
+  @@index([userId])
+}
+
+model DiagnosticTemplate {
+  id            String               @id @default(cuid())
+  code          String
+  name          String
+  description   String?
+  domain        DiagnosticDomain     @default(OPERATIONS)
+  version       Int
+  status        PublicationStatus    @default(DRAFT)
+  scoringConfig Json?
+  questions     DiagnosticQuestion[]
+  sessions      DiagnosticSession[]
+  publishedAt   DateTime?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@unique([code, version])
+  @@index([status])
+}
+
+model DiagnosticQuestion {
+  id         String             @id @default(cuid())
+  templateId String
+  pillar     String
+  code       String
+  prompt     String
+  helpText   String?
+  answerType AnswerType
+  options    Json?
+  weight     Decimal            @default(1) @db.Decimal(7, 2)
+  order      Int
+  required   Boolean            @default(true)
+  template   DiagnosticTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  answers    DiagnosticAnswer[]
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  @@unique([templateId, code])
+  @@index([templateId, pillar, order])
+}
+
+model DiagnosticSession {
+  id                  String                 @id @default(cuid())
+  companyId           String
+  templateId          String
+  originSessionId     String?
+  title               String?
+  status              DiagnosticStatus       @default(DRAFT)
+  overallScore        Decimal?               @db.Decimal(7, 2)
+  resultSummary       String?
+  resultSnapshot      Json?
+  startedAt           DateTime?
+  completedAt         DateTime?
+  company             Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  template            DiagnosticTemplate     @relation(fields: [templateId], references: [id])
+  originSession        DiagnosticSession?     @relation("DiagnosticDerivations", fields: [originSessionId], references: [id])
+  derivedSessions      DiagnosticSession[]    @relation("DiagnosticDerivations")
+  answers             DiagnosticAnswer[]
+  bottlenecks         BottleneckAssessment[]
+  recommendations     MethodRecommendation[]
+  measurements        MetricMeasurement[]
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  @@index([companyId, status])
+  @@index([templateId])
+  @@index([originSessionId])
+}
+
+model DiagnosticAnswer {
+  id         String             @id @default(cuid())
+  sessionId  String
+  questionId String
+  value      Json
+  score      Decimal?           @db.Decimal(7, 2)
+  notes      String?
+  session    DiagnosticSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  question   DiagnosticQuestion @relation(fields: [questionId], references: [id])
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  @@unique([sessionId, questionId])
+  @@index([questionId])
+}
+
+model BottleneckAssessment {
+  id                  String                 @id @default(cuid())
+  companyId           String
+  diagnosticSessionId String?
+  category            String
+  title               String
+  description         String
+  evidenceSnapshot    Json?
+  impactScore         Int?
+  urgencyScore        Int?
+  confidenceScore     Decimal?               @db.Decimal(5, 2)
+  status              BottleneckStatus       @default(ACTIVE)
+  detectedAt          DateTime               @default(now())
+  resolvedAt          DateTime?
+  company             Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  diagnosticSession   DiagnosticSession?     @relation(fields: [diagnosticSessionId], references: [id])
+  recommendations     MethodRecommendation[]
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  @@index([companyId, status])
+  @@index([diagnosticSessionId])
+}
+
+model ImprovementMethod {
+  id          String            @id @default(cuid())
+  code        String            @unique
+  name        String
+  description String
+  category    String
+  status      PublicationStatus @default(DRAFT)
+  versions    MethodVersion[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+}
+
+model MethodVersion {
+  id                 String                 @id @default(cuid())
+  methodId           String
+  version            Int
+  rationale          String?
+  requiredInputs     Json?
+  applicabilityRules Json?
+  contraindications  Json?
+  steps              Json
+  successCriteria    Json?
+  method             ImprovementMethod      @relation(fields: [methodId], references: [id], onDelete: Cascade)
+  recommendations    MethodRecommendation[]
+  lessons            MethodLesson[]
+  publishedAt        DateTime?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  @@unique([methodId, version])
+}
+
+model MethodRecommendation {
+  id                  String               @id @default(cuid())
+  companyId           String
+  diagnosticSessionId String?
+  bottleneckId        String
+  methodVersionId     String
+  rationale           String
+  tradeOffs           Json?
+  expectedImpact      Json?
+  status              RecommendationStatus @default(PROPOSED)
+  acceptedAt          DateTime?
+  company             Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  diagnosticSession   DiagnosticSession?   @relation(fields: [diagnosticSessionId], references: [id])
+  bottleneck          BottleneckAssessment @relation(fields: [bottleneckId], references: [id])
+  methodVersion       MethodVersion        @relation(fields: [methodVersionId], references: [id])
+  actionPlans         ActionPlan[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  @@index([companyId, status])
+  @@index([bottleneckId])
+  @@index([methodVersionId])
+}
+
+model ActionPlan {
+  id                String                @id @default(cuid())
+  companyId         String
+  recommendationId  String?
+  title             String
+  objective         String
+  status            ActionPlanStatus      @default(DRAFT)
+  windowDays        Int                   @default(7)
+  startsAt          DateTime?
+  dueAt             DateTime?
+  baseline          Json?
+  targetOutcome     Json?
+  company           Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  recommendation    MethodRecommendation? @relation(fields: [recommendationId], references: [id])
+  tasks             Task[]
+  checkins          ProgressCheckin[]
+  lessonAssignments LessonAssignment[]
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@index([companyId, status])
+  @@index([recommendationId])
+}
+
+model Task {
+  artifacts            WorkspaceArtifact[]
+  id                   String             @id @default(cuid())
+  companyId            String
+  actionPlanId         String
+  parentTaskId         String?
+  assigneeMembershipId String?
+  title                String
+  description          String?
+  expectedOutput       String?
+  executionGuide       Json?
+  status               TaskStatus         @default(TODO)
+  priority             TaskPriority       @default(MEDIUM)
+  sortOrder            Int                @default(0)
+  startsAt             DateTime?
+  dueAt                DateTime?
+  completedAt          DateTime?
+  company              Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  actionPlan           ActionPlan         @relation(fields: [actionPlanId], references: [id], onDelete: Cascade)
+  parentTask           Task?              @relation("TaskChildren", fields: [parentTaskId], references: [id])
+  childTasks           Task[]             @relation("TaskChildren")
+  assignee             CompanyMembership? @relation("TaskAssignee", fields: [assigneeMembershipId], references: [id])
+  blockingDependencies TaskDependency[]   @relation("BlockingTask")
+  blockedDependencies  TaskDependency[]   @relation("BlockedTask")
+  evidence             EvidenceOutput[]
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@index([companyId, status])
+  @@index([actionPlanId, sortOrder])
+  @@index([assigneeMembershipId])
+  @@index([parentTaskId])
+}
+
+model TaskDependency {
+  blockingTaskId String
+  blockedTaskId  String
+  blockingTask   Task     @relation("BlockingTask", fields: [blockingTaskId], references: [id], onDelete: Cascade)
+  blockedTask    Task     @relation("BlockedTask", fields: [blockedTaskId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+
+  @@id([blockingTaskId, blockedTaskId])
+  @@index([blockedTaskId])
+}
+
+model Lesson {
+  id              String            @id @default(cuid())
+  slug            String            @unique
+  title           String
+  summary         String
+  content         Json?
+  videoUrl        String?
+  durationMinutes Int?
+  status          PublicationStatus @default(DRAFT)
+  methodLinks     MethodLesson[]
+  assignments     LessonAssignment[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+}
+
+model MethodLesson {
+  methodVersionId String
+  lessonId        String
+  order           Int           @default(0)
+  required        Boolean       @default(false)
+  methodVersion   MethodVersion @relation(fields: [methodVersionId], references: [id], onDelete: Cascade)
+  lesson          Lesson        @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@id([methodVersionId, lessonId])
+  @@index([lessonId])
+}
+
+model LessonAssignment {
+  id              String               @id @default(cuid())
+  companyId       String
+  lessonId        String
+  actionPlanId    String?
+  userId          String?
+  status          LessonProgressStatus @default(ASSIGNED)
+  progressPercent Int                  @default(0)
+  dueAt           DateTime?
+  completedAt     DateTime?
+  company         Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lesson          Lesson               @relation(fields: [lessonId], references: [id])
+  actionPlan      ActionPlan?          @relation(fields: [actionPlanId], references: [id])
+  user            User?                @relation(fields: [userId], references: [id])
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@index([companyId, status])
+  @@index([actionPlanId])
+  @@index([userId])
+}
+
+model ProgressCheckin {
+  id                      String             @id @default(cuid())
+  companyId               String
+  actionPlanId            String?
+  submittedByMembershipId String?
+  status                  CheckinStatus      @default(OPEN)
+  summary                 String?
+  observedOutcome         String?
+  blockers                String?
+  aiEvaluation            String?
+  nextPriority            String?
+  metricSnapshot          Json?
+  company                 Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  actionPlan              ActionPlan?        @relation(fields: [actionPlanId], references: [id])
+  submittedBy             CompanyMembership? @relation("CheckinSubmitter", fields: [submittedByMembershipId], references: [id])
+  evidence                EvidenceOutput[]
+  measurements            MetricMeasurement[]
+  submittedAt             DateTime?
+  reviewedAt              DateTime?
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  @@index([companyId, status])
+  @@index([actionPlanId])
+  @@index([submittedByMembershipId])
+}
+
+model EvidenceOutput {
+  id           String           @id @default(cuid())
+  companyId    String
+  taskId       String?
+  checkinId    String?
+  type         EvidenceType
+  label        String
+  textValue    String?
+  numericValue Decimal?         @db.Decimal(18, 4)
+  fileUrl      String?
+  metadata     Json?
+  company      Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  task         Task?            @relation(fields: [taskId], references: [id])
+  checkin      ProgressCheckin? @relation(fields: [checkinId], references: [id])
+  createdAt    DateTime         @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([taskId])
+  @@index([checkinId])
+}
+
+model ConversationThread {
+  artifacts     WorkspaceArtifact[]
+  id            String                @id @default(cuid())
+  companyId     String
+  title         String
+  status        ConversationStatus    @default(ACTIVE)
+  lastMessageAt DateTime?
+  workflowState Json?
+  generationId String?
+  generationStartedAt DateTime?
+  company       Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  messages      ConversationMessage[]
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  @@index([companyId, status])
+}
+
+model ConversationMessage {
+  id           String             @id @default(cuid())
+  threadId     String
+  authorUserId String?
+  role         MessageRole
+  content      String             @db.Text
+  metadata     Json?
+  thread       ConversationThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  authorUser   User?              @relation(fields: [authorUserId], references: [id])
+  createdAt    DateTime           @default(now())
+
+  @@index([threadId, createdAt])
+  @@index([authorUserId])
+}
+
+// Small editable tools and original evidence. Originals stay private, never in /public.
+model WorkspaceArtifact {
+  id             String   @id @default(cuid())
+  companyId      String
+  taskId         String?
+  threadId       String?
+  title          String
+  kind           String
+  content        Json?
+  interpretation Json?
+  originalName   String?
+  mimeType       String?
+  fileData       Bytes?
+  confirmedAt    DateTime?
+  revision       Int      @default(1)
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  task           Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  thread         ConversationThread? @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([companyId, taskId])
+  @@index([companyId, threadId])
+}
+
+model CompanyMemory {
+  id            String           @id @default(cuid())
+  companyId     String
+  kind          MemoryKind
+  title         String
+  content       String           @db.Text
+  sourceType    MemorySourceType
+  sourceId      String?
+  confidence    Decimal          @default(1) @db.Decimal(5, 2)
+  validFrom     DateTime         @default(now())
+  invalidatedAt DateTime?
+  company       Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([companyId, kind, invalidatedAt])
+  @@index([sourceType, sourceId])
+}
+
+model MetricDefinition {
+  id           String              @id @default(cuid())
+  companyId    String
+  code         String
+  name         String
+  description  String?
+  unit         String
+  direction    MetricDirection
+  company      Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  measurements MetricMeasurement[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  @@unique([companyId, code])
+}
+
+model MetricMeasurement {
+  id                  String             @id @default(cuid())
+  companyId           String
+  metricId            String
+  diagnosticSessionId String?
+  checkinId           String?
+  value               Decimal            @db.Decimal(18, 4)
+  measuredAt          DateTime
+  source              String
+  note                String?
+  company             Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  metric              MetricDefinition   @relation(fields: [metricId], references: [id], onDelete: Cascade)
+  diagnosticSession   DiagnosticSession? @relation(fields: [diagnosticSessionId], references: [id])
+  checkin             ProgressCheckin?   @relation(fields: [checkinId], references: [id])
+  createdAt           DateTime            @default(now())
+
+  @@index([companyId, measuredAt])
+  @@index([metricId, measuredAt])
+  @@index([diagnosticSessionId])
+  @@index([checkinId])
+}

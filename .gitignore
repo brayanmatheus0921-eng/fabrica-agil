@@ -1,0 +1,48 @@
+# Dependencies
+/node_modules
+/.pnp
+.pnp.*
+
+# Next.js
+/.next/
+/out/
+/build/
+
+# Tests
+/coverage/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Prisma generated client
+/src/generated/prisma/
+
+# Local tooling
+/.local-tools/
+/backups/
+/.artifacts/
+/.codex-remote-attachments/
+/tmp/
+/output/
+/outputs/
+/qa_docx_agil_*/
+/qa-source-docx/
+/rendered-docx-qa/
+/fabrica-facil-scaffold/
+*.tsbuildinfo
+next-env.d.ts
+.vercel/
+.DS_Store
+*.pem
+
+# Temporary local PostgreSQL development cluster
+/dev-postgres-data/
+/dev-postgres.log
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
