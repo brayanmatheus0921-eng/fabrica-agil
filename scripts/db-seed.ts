@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { loadEnvFile } from "node:process";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
@@ -14,7 +15,9 @@ import {
 import { ROTA30_DIAGNOSTIC_METHOD } from "../src/core/rota30-diagnostic-method";
 import { STRATEGIC_OPERATIONAL_METHOD } from "../src/core/strategic-operational-method";
 
-loadEnvFile(".env");
+if (existsSync(".env")) {
+  loadEnvFile(".env");
+}
 
 const connectionString = process.env.DATABASE_URL;
 
