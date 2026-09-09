@@ -18,7 +18,7 @@ Versão atual: **v0.1.0-beta.1**.
 - Plano construído com o empresário, três prioridades, 5W2H e aprovação antes da execução.
 - Modelo de dados versiona templates de diagnóstico e métodos.
 - Contratos Zod validam o método de diagnóstico e as respostas estruturadas do COO.
-- PostgreSQL local temporário com migração e dados iniciais de desenvolvimento.
+- PostgreSQL local para desenvolvimento e deploy persistente preparado para Easypanel.
 - Empresa fixa sem login para validar o fluxo antes da autenticação.
 - Onboarding persistente que gera a primeira memória estruturada da empresa.
 - O arquivo de ambiente local não é versionado.
@@ -120,6 +120,7 @@ scripts/
   db-local.ps1               Controle do PostgreSQL local temporário
 docs/
   architecture.md            Decisões e limites da arquitetura
+  deploy-easypanel.md        Processo completo de deploy e recuperação
   diagnostic-method-contract.md
                               Contrato para receber o método
 ```
@@ -128,10 +129,12 @@ docs/
 
 Executar a primeira rodada de testes com dados controlados, anotar os pontos de fricção e revisar o método antes de abrir o sistema para clientes reais.
 
+Para criar ou atualizar o ambiente da VPS, siga o [processo oficial de deploy no Easypanel](docs/deploy-easypanel.md).
+
 ## Limites desta etapa
 
 - Não existe autenticação ou autorização; esta versão usa uma única empresa fixa.
-- O banco local e os dados demonstrativos não fazem parte do versionamento.
+- Bancos, dados locais e dados da VPS não fazem parte do versionamento.
 - A chave da OpenAI e outras variáveis locais não fazem parte do versionamento.
 - A versão atual não pode ser publicada para clientes reais antes de autenticação.
-- O schema não deve ser aplicado a um banco de produção sem revisão.
+- Migrações destrutivas não devem ser aplicadas ao banco da VPS sem revisão e backup.
