@@ -74,7 +74,8 @@ body {
 }
 
 /* Let product pages fit narrow viewports even with a visible scrollbar. */
-body:has(.app-shell) {
+body:has(.app-shell),
+body:has(.first-access) {
   min-width: 0;
 }
 

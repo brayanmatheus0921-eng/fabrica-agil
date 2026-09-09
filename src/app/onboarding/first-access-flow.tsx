@@ -20,8 +20,8 @@ export function FirstAccessFlow({
 }) {
   if (!started) {
     return (
-      <main className="h-dvh overflow-hidden bg-[#f5f3ef] px-4 py-5 sm:px-8 sm:py-8">
-        <div className="mx-auto flex h-full max-w-6xl flex-col">
+      <main className="first-access min-h-dvh bg-background px-4 py-5 sm:px-8 sm:py-8">
+        <div className="mx-auto flex min-h-[calc(100dvh-4rem)] max-w-3xl flex-col">
           <header className="flex items-center justify-between">
             <Link href="/" className="text-lg font-black tracking-[-0.04em] text-[#0b1320]">
               Fábrica Ágil
@@ -30,17 +30,17 @@ export function FirstAccessFlow({
               Pular por agora
             </Link>
           </header>
-          <div className="flex flex-1 flex-col items-center justify-center text-center">
+          <div className="flex flex-1 flex-col items-center justify-center py-10 text-center sm:py-16">
             <div className="mb-8 w-full max-w-2xl">
               <OnboardingProgress current={1} />
             </div>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0b1320]">
               Primeiro acesso
             </p>
-            <h1 className="mt-3 max-w-3xl text-3xl font-black tracking-[-0.04em] text-[#0b1320] sm:text-5xl">
+            <h1 className="mt-3 max-w-xl text-2xl font-bold tracking-[-0.03em] text-foreground sm:text-3xl">
               Primeiro, dê contexto à sua consultora
             </h1>
-            <p className="mx-auto mt-4 max-w-2xl text-sm leading-6 text-[#69717d] sm:text-base">
+            <p className="mx-auto mt-4 max-w-lg text-sm leading-6 text-muted">
               São 9 respostas rápidas sobre a realidade da fábrica. Depois,
               você faz o diagnóstico operacional para encontrar o principal
               gargalo da produção.
@@ -66,10 +66,10 @@ export function FirstAccessFlow({
   const initialValue = initialValues[field.key] ?? "";
 
   return (
-    <main className="h-dvh overflow-hidden bg-[#f5f3ef] p-3 sm:px-8 sm:py-5">
-      <div className="mx-auto grid h-full max-w-4xl grid-rows-[44px_minmax(0,1fr)_18px] gap-2 sm:grid-rows-[48px_minmax(0,1fr)_18px] sm:gap-3">
+    <main className="first-access min-h-dvh bg-background px-4 py-4 sm:px-8 sm:py-6 lg:py-8">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 sm:gap-6">
         <header className="relative z-10 flex items-center justify-between">
-          <Link href="/onboarding" className="text-lg font-black tracking-[-0.04em] text-[#0b1320]">
+          <Link href="/onboarding" className="text-base font-bold tracking-[-0.03em] text-foreground">
             Fábrica Ágil
           </Link>
           <Link href="/dashboard" className="rounded-xl border bg-white px-3.5 py-2 text-sm font-bold text-[#59616d] transition hover:border-[#c9c4bc] hover:text-[#0b1320] sm:px-4">
@@ -77,8 +77,8 @@ export function FirstAccessFlow({
           </Link>
         </header>
 
-        <div className="flex min-h-0 items-center justify-center">
-          <section className="flex h-full max-h-[660px] w-full min-h-0 flex-col overflow-hidden rounded-2xl border bg-white p-4 shadow-[0_20px_60px_rgba(20,35,27,0.08)] sm:rounded-3xl sm:p-7">
+        <div className="flex items-center justify-center">
+          <section className="flex w-full min-w-0 flex-col rounded-2xl border bg-surface p-4 shadow-[0_8px_32px_rgba(20,35,27,0.04)] sm:p-6 lg:p-8">
             <div className="mb-3 shrink-0">
               <OnboardingProgress current={1} />
             </div>
@@ -90,13 +90,13 @@ export function FirstAccessFlow({
                 <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#0b1320] sm:text-xs">
                   Contexto da empresa
                 </p>
-                <p className="text-sm text-[#69717d]">
+                <p className="text-xs leading-5 text-muted">
                   Pergunta {current} de {companyProfileQuestions.length}
                 </p>
               </div>
             </div>
 
-            <form action={saveOnboardingStep} className="flex min-h-0 flex-1 flex-col gap-3 sm:gap-4">
+            <form action={saveOnboardingStep} className="flex min-w-0 flex-col gap-5 sm:gap-6">
               <input type="hidden" name="question" value={current} />
               <div className="flex shrink-0 gap-1.5" aria-label="Progresso do cadastro">
                 {companyProfileQuestions.map((item, index) => (
@@ -109,23 +109,23 @@ export function FirstAccessFlow({
                 ))}
               </div>
 
-              <fieldset className="flex min-h-0 flex-1 flex-col justify-center rounded-2xl border bg-[#f8f9f6] p-4 sm:p-7">
-                <legend className="px-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[#0b1320] sm:text-xs">
+              <fieldset className="min-w-0 border-0 p-0">
+                <legend className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">
                   Etapa {current}
                 </legend>
-                <h1 className="mt-1 text-xl font-bold leading-7 text-[#0b1320] sm:mt-3 sm:text-2xl sm:leading-8">
+                <h1 className="mt-2 text-xl font-semibold leading-7 tracking-[-0.02em] text-foreground">
                   {field.title}
                 </h1>
-                <p className="mt-1.5 text-xs leading-5 text-[#69717d] sm:mt-2 sm:text-sm sm:leading-6">
+                <p className="mt-2 text-sm leading-6 text-muted">
                   {field.hint}
                 </p>
 
                 {field.type === "choice" ? (
-                  <div className="mt-4 grid gap-2 sm:mt-6 sm:grid-cols-2">
+                  <div className="mt-5 grid gap-2.5 sm:grid-cols-2">
                     {field.options.map((option, index) => (
                       <label
                         key={option}
-                        className="group flex min-h-14 cursor-pointer items-center gap-3 rounded-xl border border-[#dedbd5] bg-white px-4 py-3 text-sm font-semibold transition hover:border-[#0b1320]/50 has-[:checked]:border-[#0b1320] has-[:checked]:bg-[#f5e8d8] has-[:checked]:text-[#0b1320]"
+                        className="group flex min-h-12 min-w-0 cursor-pointer items-center gap-2.5 rounded-xl border bg-surface px-3 py-2.5 text-sm font-medium leading-5 transition-colors hover:border-primary/60 has-[:checked]:border-primary has-[:checked]:bg-surface-muted has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-primary"
                       >
                         <input
                           required
@@ -135,7 +135,7 @@ export function FirstAccessFlow({
                           defaultChecked={String(initialValue) === option}
                           className="peer sr-only"
                         />
-                        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-[#eeece8] text-xs font-black text-[#5f6d64] peer-checked:bg-[#0b1320] peer-checked:text-white">
+                        <span className="grid size-6 shrink-0 place-items-center rounded-full bg-surface-muted text-xs font-semibold text-muted peer-checked:bg-primary peer-checked:text-[var(--primary-contrast)]">
                           {index + 1}
                         </span>
                         <span>{option}</span>
@@ -167,7 +167,7 @@ export function FirstAccessFlow({
                 ) : null}
               </fieldset>
 
-              <div className="flex shrink-0 items-center justify-between border-t pt-3 sm:pt-4">
+              <div className="flex items-center justify-between gap-3 border-t pt-4">
                 {current > 1 ? (
                   <Link href={`/onboarding?step=form&question=${current - 1}`} className="px-3 py-2.5 text-sm font-bold text-[#69717d] sm:px-4">
                     Voltar
@@ -175,7 +175,7 @@ export function FirstAccessFlow({
                 ) : (
                   <span />
                 )}
-                <button type="submit" className="rounded-xl bg-[#0b1320] px-4 py-2.5 text-sm font-bold text-white sm:px-5 sm:py-3">
+                <button type="submit" className="min-h-11 min-w-0 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-[var(--primary-contrast)] transition-colors hover:bg-primary-strong">
                   {current === companyProfileQuestions.length
                     ? "Salvar e continuar para triagem"
                     : "Continuar"}
