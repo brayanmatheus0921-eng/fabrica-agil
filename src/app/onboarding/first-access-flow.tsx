@@ -6,6 +6,7 @@ import {
 } from "@/core/company-profile";
 import { OnboardingProgress } from "@/components/onboarding-progress";
 import { saveOnboardingStep } from "./actions";
+import styles from "./first-access.module.css";
 
 export function FirstAccessFlow({
   initialValues,
@@ -66,8 +67,8 @@ export function FirstAccessFlow({
   const initialValue = initialValues[field.key] ?? "";
 
   return (
-    <main className="first-access min-h-dvh bg-background px-4 py-4 sm:px-8 sm:py-6 lg:py-8">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 sm:gap-6">
+    <main className={`first-access ${styles.screen} bg-background`}>
+      <div className={styles.shell}>
         <header className="relative z-10 flex items-center justify-between">
           <Link href="/onboarding" className="text-base font-bold tracking-[-0.03em] text-foreground">
             Fábrica Ágil
@@ -77,26 +78,22 @@ export function FirstAccessFlow({
           </Link>
         </header>
 
-        <div className="flex items-center justify-center">
-          <section className="flex w-full min-w-0 flex-col rounded-2xl border bg-surface p-4 shadow-[0_8px_32px_rgba(20,35,27,0.04)] sm:p-6 lg:p-8">
-            <div className="mb-3 shrink-0">
+        <div className={styles.stage}>
+          <section className={`${styles.card} rounded-2xl border bg-surface shadow-[0_8px_32px_rgba(20,35,27,0.04)]`}>
+            <div className={styles.progress}>
               <OnboardingProgress current={1} />
             </div>
-            <div className="mb-3 flex shrink-0 items-center gap-3 sm:mb-4">
-              <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#f5e8d8] text-[#0b1320] sm:size-10">
-                <Building2 aria-hidden="true" className="size-5" />
-              </span>
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#0b1320] sm:text-xs">
+            <div className="flex shrink-0 items-center justify-between gap-3 text-[11px] text-muted">
+                <p className="flex items-center gap-1.5 font-semibold">
+                  <Building2 aria-hidden="true" className="size-3.5" />
                   Contexto da empresa
                 </p>
-                <p className="text-xs leading-5 text-muted">
+                <p>
                   Pergunta {current} de {companyProfileQuestions.length}
                 </p>
-              </div>
             </div>
 
-            <form action={saveOnboardingStep} className="flex min-w-0 flex-col gap-5 sm:gap-6">
+            <form action={saveOnboardingStep} className={styles.form}>
               <input type="hidden" name="question" value={current} />
               <div className="flex shrink-0 gap-1.5" aria-label="Progresso do cadastro">
                 {companyProfileQuestions.map((item, index) => (
@@ -109,23 +106,24 @@ export function FirstAccessFlow({
                 ))}
               </div>
 
+              <div className={styles.question}>
               <fieldset className="min-w-0 border-0 p-0">
-                <legend className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">
+                <legend className="sr-only">
                   Etapa {current}
                 </legend>
-                <h1 className="mt-2 text-xl font-semibold leading-7 tracking-[-0.02em] text-foreground">
+                <h1 className={`${styles.title} font-semibold tracking-[-0.02em] text-foreground`}>
                   {field.title}
                 </h1>
-                <p className="mt-2 text-sm leading-6 text-muted">
+                <p className={`${styles.hint} text-muted`}>
                   {field.hint}
                 </p>
 
                 {field.type === "choice" ? (
-                  <div className="mt-5 grid gap-2.5 sm:grid-cols-2">
+                  <div className={`${styles.options} grid sm:grid-cols-2`}>
                     {field.options.map((option, index) => (
                       <label
                         key={option}
-                        className="group flex min-h-12 min-w-0 cursor-pointer items-center gap-2.5 rounded-xl border bg-surface px-3 py-2.5 text-sm font-medium leading-5 transition-colors hover:border-primary/60 has-[:checked]:border-primary has-[:checked]:bg-surface-muted has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-primary"
+                        className={`${styles.option} group flex min-w-0 cursor-pointer items-center gap-2.5 rounded-xl border bg-surface font-medium transition-colors hover:border-primary/60 has-[:checked]:border-primary has-[:checked]:bg-surface-muted has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-primary`}
                       >
                         <input
                           required
@@ -158,7 +156,7 @@ export function FirstAccessFlow({
                     type={field.type}
                     min={field.type === "number" ? 1 : undefined}
                     placeholder={field.placeholder}
-                    className="mt-4 w-full rounded-xl border bg-white px-4 py-3 text-base outline-none placeholder:text-[#9a968f] focus:border-[#0b1320] sm:mt-6"
+                    className="mt-3 w-full rounded-xl border bg-surface px-3 py-2.5 text-base outline-none placeholder:text-muted focus:border-primary"
                   />
                 ) : null}
 
@@ -166,8 +164,9 @@ export function FirstAccessFlow({
                   <p className="mt-3 text-sm font-semibold text-red-700">{error}</p>
                 ) : null}
               </fieldset>
+              </div>
 
-              <div className="flex items-center justify-between gap-3 border-t pt-4">
+              <div className={`${styles.actions} flex items-center justify-between gap-3 border-t`}>
                 {current > 1 ? (
                   <Link href={`/onboarding?step=form&question=${current - 1}`} className="px-3 py-2.5 text-sm font-bold text-[#69717d] sm:px-4">
                     Voltar
@@ -177,14 +176,14 @@ export function FirstAccessFlow({
                 )}
                 <button type="submit" className="min-h-11 min-w-0 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-[var(--primary-contrast)] transition-colors hover:bg-primary-strong">
                   {current === companyProfileQuestions.length
-                    ? "Salvar e continuar para triagem"
+                    ? "Salvar e continuar"
                     : "Continuar"}
                 </button>
               </div>
             </form>
           </section>
         </div>
-        <div className="flex items-center justify-center gap-2 text-[11px] leading-[18px] text-[#7b897f]">
+        <div className={`${styles.note} flex items-center justify-center gap-2 text-[11px] leading-[18px] text-muted`}>
           <Database aria-hidden="true" className="size-3.5" />
           Cada resposta é salva antes de avançar
         </div>
