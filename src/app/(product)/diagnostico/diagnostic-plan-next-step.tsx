@@ -1,11 +1,11 @@
+import { requireAuth } from "@/server/auth";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { diagnosticPlanId } from "@/core/diagnostic-plan";
-import { DEV_COMPANY_ID } from "@/core/development";
 import { GeneratePlanButton } from "./generate-plan-button";
 
 export async function DiagnosticPlanNextStep({ sessionId }: { sessionId: string }) {
-  const plan = await prisma.actionPlan.findFirst({ where: { companyId: DEV_COMPANY_ID, OR: [{ id: diagnosticPlanId(sessionId) }, { baseline: { path: ["diagnosticSessionId"], equals: sessionId } }] }, orderBy: { createdAt: "desc" } });
+  const plan = await prisma.actionPlan.findFirst({ where: { companyId: (await requireAuth()).companyId, OR: [{ id: diagnosticPlanId(sessionId) }, { baseline: { path: ["diagnosticSessionId"], equals: sessionId } }] }, orderBy: { createdAt: "desc" } });
   return <section className="flex flex-col gap-5 rounded-2xl border bg-white p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
     <div><p className="text-xs font-semibold  text-[#9a6538]">Próximo passo</p>
       <h2 className="mt-2 text-xl font-semibold">{plan ? "Seu plano está salvo" : "Transforme este diagnóstico em um plano"}</h2>

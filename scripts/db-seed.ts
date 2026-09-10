@@ -2,11 +2,6 @@ import { existsSync } from "node:fs";
 import { loadEnvFile } from "node:process";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
-import {
-  DEV_COMPANY_ID,
-  DEV_MEMBERSHIP_ID,
-  DEV_USER_ID,
-} from "../src/core/development";
 import { buildDiagnosticTitle } from "../src/core/diagnostic-history";
 import {
   ENTERPRISE_TRIAGE_METHOD,
@@ -29,6 +24,16 @@ const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString }),
 });
 
+const TEST_ACCOUNTS = ["Mateus", "Anny", "Poker", "Evaldo", "Brayan"].map(
+  (name) => ({
+    name,
+    email: `${name.toLowerCase()}@faba.com`,
+    userId: `test-user-${name.toLowerCase()}`,
+    companyId: `test-company-${name.toLowerCase()}`,
+    membershipId: `test-membership-${name.toLowerCase()}`,
+  }),
+);
+
 async function main() {
   await prisma.diagnosticTemplate.updateMany({
     where: { code: "MOVEIS-OPERACIONAL-V1", status: "ACTIVE" },
@@ -50,44 +55,43 @@ async function main() {
     data: { status: "ARCHIVED" },
   });
 
-  await prisma.user.upsert({
-    where: { id: DEV_USER_ID },
-    update: {
-      name: "Gestor de desenvolvimento",
-      email: "gestor.dev@fabrica-agil.local",
-    },
-    create: {
-      id: DEV_USER_ID,
-      name: "Gestor de desenvolvimento",
-      email: "gestor.dev@fabrica-agil.local",
-    },
-  });
-
-  await prisma.company.upsert({
-    where: { id: DEV_COMPANY_ID },
-    update: {},
-    create: {
-      id: DEV_COMPANY_ID,
-      name: "Minha fábrica",
-      onboardingStatus: "NOT_STARTED",
-    },
-  });
-
-  await prisma.companyMembership.upsert({
+  await prisma.company.deleteMany({ where: { id: "dev-company-fabrica-agil" } });
+  await prisma.user.deleteMany({
     where: {
-      companyId_userId: {
-        companyId: DEV_COMPANY_ID,
-        userId: DEV_USER_ID,
-      },
-    },
-    update: { role: "OWNER" },
-    create: {
-      id: DEV_MEMBERSHIP_ID,
-      companyId: DEV_COMPANY_ID,
-      userId: DEV_USER_ID,
-      role: "OWNER",
+      OR: [
+        { id: "dev-user-fabrica-agil" },
+        { email: "gestor.dev@fabrica-agil.local" },
+      ],
     },
   });
+
+  for (const account of TEST_ACCOUNTS) {
+    await prisma.user.upsert({
+      where: { email: account.email },
+      update: { name: account.name },
+      create: { id: account.userId, name: account.name, email: account.email },
+    });
+    await prisma.company.upsert({
+      where: { id: account.companyId },
+      update: {},
+      create: {
+        id: account.companyId,
+        name: "Minha fábrica",
+        onboardingStatus: "NOT_STARTED",
+      },
+    });
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: account.email } });
+    await prisma.companyMembership.upsert({
+      where: { companyId_userId: { companyId: account.companyId, userId: user.id } },
+      update: { role: "OWNER" },
+      create: {
+        id: account.membershipId,
+        companyId: account.companyId,
+        userId: user.id,
+        role: "OWNER",
+      },
+    });
+  }
 
   const enterpriseTriage = ENTERPRISE_TRIAGE_METHOD;
   const enterpriseTemplate = await prisma.diagnosticTemplate.upsert({
@@ -347,34 +351,11 @@ async function main() {
     }
   }
 
-  const activePlan = await prisma.actionPlan.findFirst({
-    where: { companyId: DEV_COMPANY_ID, status: "ACTIVE" },
-    orderBy: { createdAt: "desc" },
-    select: { id: true, _count: { select: { checkins: true } } },
-  });
-  if (activePlan && activePlan._count.checkins === 0) {
-    const dueAt = new Date();
-    dueAt.setDate(dueAt.getDate() + 3);
-    await prisma.progressCheckin.create({
-      data: {
-        companyId: DEV_COMPANY_ID,
-        actionPlanId: activePlan.id,
-        status: "OPEN",
-        metricSnapshot: {
-          sequence: 1,
-          week: 1,
-          dueAt: dueAt.toISOString(),
-          type: "EXECUTION",
-        },
-      },
-    });
-  }
-
   console.log(
     JSON.stringify({
       status: "ok",
-      companyId: DEV_COMPANY_ID,
-      environment: "development",
+      accounts: TEST_ACCOUNTS.map(({ name, email, companyId }) => ({ name, email, companyId })),
+      environment: "test",
       diagnosticTemplate: diagnosticMethod.code,
       enterpriseTriage: enterpriseTriage.code,
       questions: diagnosticMethod.questions.length,

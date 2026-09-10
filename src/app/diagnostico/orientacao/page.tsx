@@ -1,4 +1,5 @@
-﻿import type { Metadata } from "next";
+import { requireAuth } from "@/server/auth";
+import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
@@ -10,7 +11,6 @@ import {
 } from "lucide-react";
 import { OnboardingProgress } from "@/components/onboarding-progress";
 import { asDiagnosticRecord } from "@/core/diagnostic-history";
-import { DEV_COMPANY_ID } from "@/core/development";
 import { prisma } from "@/lib/prisma";
 import { createDraftPlan } from "@/app/(product)/plano-de-acao/actions";
 
@@ -27,7 +27,7 @@ export default async function DiagnosticGuidancePage({
     ? await prisma.diagnosticSession.findFirst({
         where: {
           id: params.id,
-          companyId: DEV_COMPANY_ID,
+          companyId: (await requireAuth()).companyId,
           status: "COMPLETED",
           template: { domain: "OPERATIONS" },
         },

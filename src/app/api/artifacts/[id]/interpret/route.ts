@@ -1,5 +1,5 @@
+import { requireAuth } from "@/server/auth";
 import { prisma } from "@/lib/prisma";
-import { DEV_COMPANY_ID } from "@/core/development";
 import { sameOrigin } from "@/server/ai/chat-generation";
 import { artifactContext, artifactSelect, artifactView } from "@/server/artifacts";
 import { interpretArtifact } from "@/server/ai/artifact-agent";
@@ -9,7 +9,7 @@ export const maxDuration = 150;
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!sameOrigin(request)) return new Response(null, { status: 403 });
   const { id } = await params;
-  const row = await prisma.workspaceArtifact.findFirst({ where: { id, companyId: DEV_COMPANY_ID } });
+  const row = await prisma.workspaceArtifact.findFirst({ where: { id, companyId: (await requireAuth()).companyId } });
   if (!row) return new Response(null, { status: 404 });
   try {
     if (!row.taskId) return Response.json({ error: "Vincule a uma tarefa antes de interpretar." }, { status: 400 });
@@ -21,7 +21,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       source = { text: JSON.stringify({ ...canvas, example: [], note: "Linhas numeradas a partir de 1; example removido por não ser dado real." }), image: undefined };
     }
     const interpretation = await interpretArtifact(await artifactContext(row.taskId), source.text, source.image);
-    const changed = await prisma.workspaceArtifact.updateMany({ where: { id, companyId: DEV_COMPANY_ID, revision: row.revision }, data: { interpretation, confirmedAt: null, revision: { increment: 1 } } });
+    const changed = await prisma.workspaceArtifact.updateMany({ where: { id, companyId: (await requireAuth()).companyId, revision: row.revision }, data: { interpretation, confirmedAt: null, revision: { increment: 1 } } });
     if (!changed.count) return Response.json({ error: "O arquivo mudou durante a leitura. Tente novamente com a versão atual." }, { status: 409 });
     return Response.json({ artifact: artifactView(await prisma.workspaceArtifact.findUniqueOrThrow({ where: { id }, select: artifactSelect })) });
   } catch (e) {

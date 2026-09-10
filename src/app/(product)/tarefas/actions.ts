@@ -1,9 +1,9 @@
-﻿"use server";
+"use server";
 
+import { requireAuth } from "@/server/auth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { DEV_COMPANY_ID } from "@/core/development";
 import { prisma } from "@/lib/prisma";
 
 const taskSchema = z.object({
@@ -50,7 +50,7 @@ export async function createManualProject(formData: FormData) {
   if (!parsed.success) redirect("/tarefas?error=Confira+o+nome,+objetivo+e+prazo+do+projeto");
   const now = new Date();
   const project = await prisma.actionPlan.create({ data: {
-    companyId: DEV_COMPANY_ID, title: parsed.data.title, objective: parsed.data.objective,
+    companyId: (await requireAuth()).companyId, title: parsed.data.title, objective: parsed.data.objective,
     status: "ACTIVE", windowDays: parsed.data.windowDays, startsAt: now, dueAt: addDays(now, parsed.data.windowDays),
     baseline: { source: "MANUAL", createdBy: "USER" }, targetOutcome: { source: "MANUAL" },
   } });
@@ -64,12 +64,12 @@ export async function createManualTask(formData: FormData) {
     expectedOutput: formData.get("expectedOutput") ?? "", priority: formData.get("priority"), dueDate: formData.get("dueDate") ?? "",
   });
   if (!parsed.success) redirect(`/tarefas?project=${String(formData.get("planId") ?? "")}&error=Confira+os+dados+da+tarefa`);
-  const project = await prisma.actionPlan.findFirst({ where: { id: parsed.data.planId, companyId: DEV_COMPANY_ID, status: "ACTIVE" }, select: { id: true, startsAt: true, dueAt: true } });
+  const project = await prisma.actionPlan.findFirst({ where: { id: parsed.data.planId, companyId: (await requireAuth()).companyId, status: "ACTIVE" }, select: { id: true, startsAt: true, dueAt: true } });
   if (!project) redirect("/tarefas?error=Projeto+ativo+não+encontrado");
   const lastTask = await prisma.task.findFirst({ where: { actionPlanId: project.id }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } });
   const parsedDue = parsed.data.dueDate ? new Date(`${parsed.data.dueDate}T12:00:00`) : project.dueAt;
   await prisma.task.create({ data: {
-    companyId: DEV_COMPANY_ID, actionPlanId: project.id, title: parsed.data.title,
+    companyId: (await requireAuth()).companyId, actionPlanId: project.id, title: parsed.data.title,
     description: parsed.data.description || "Tarefa criada manualmente pelo gestor.",
     expectedOutput: parsed.data.expectedOutput || "Registrar o que foi feito e anexar a evidência disponível.",
     priority: parsed.data.priority, status: "TODO", sortOrder: (lastTask?.sortOrder ?? 0) + 1,
@@ -82,7 +82,7 @@ export async function createManualTask(formData: FormData) {
 export async function moveTask(formData: FormData) {
   const parsed = moveTaskSchema.safeParse({ taskId: formData.get("taskId"), status: formData.get("status"), projectId: formData.get("projectId") });
   if (!parsed.success) redirect("/tarefas?error=Movimentação+inválida");
-  const task = await prisma.task.findFirst({ where: { id: parsed.data.taskId, companyId: DEV_COMPANY_ID, actionPlanId: parsed.data.projectId, actionPlan: { status: "ACTIVE" } }, select: { id: true } });
+  const task = await prisma.task.findFirst({ where: { id: parsed.data.taskId, companyId: (await requireAuth()).companyId, actionPlanId: parsed.data.projectId, actionPlan: { status: "ACTIVE" } }, select: { id: true } });
   if (!task) redirect(`/tarefas?project=${parsed.data.projectId}&error=Tarefa+não+encontrada`);
   await prisma.task.update({ where: { id: task.id }, data: { status: parsed.data.status, completedAt: parsed.data.status === "DONE" ? new Date() : null } });
   revalidatePath("/dashboard"); revalidatePath("/tarefas"); revalidatePath(`/tarefas/${task.id}`); revalidatePath("/acompanhamento");
@@ -92,7 +92,7 @@ export async function moveTask(formData: FormData) {
 export async function moveTaskFromKanban(formData: FormData) {
   const parsed = moveTaskSchema.safeParse({ taskId: formData.get("taskId"), status: formData.get("status"), projectId: formData.get("projectId") });
   if (!parsed.success) return { ok: false, error: "Movimentação inválida" } as const;
-  const task = await prisma.task.findFirst({ where: { id: parsed.data.taskId, companyId: DEV_COMPANY_ID, actionPlanId: parsed.data.projectId, actionPlan: { status: "ACTIVE" } }, select: { id: true } });
+  const task = await prisma.task.findFirst({ where: { id: parsed.data.taskId, companyId: (await requireAuth()).companyId, actionPlanId: parsed.data.projectId, actionPlan: { status: "ACTIVE" } }, select: { id: true } });
   if (!task) return { ok: false, error: "Tarefa não encontrada" } as const;
   await prisma.task.update({ where: { id: task.id }, data: { status: parsed.data.status, completedAt: parsed.data.status === "DONE" ? new Date() : null } });
   revalidatePath("/dashboard"); revalidatePath("/plano-de-acao"); revalidatePath("/tarefas"); revalidatePath(`/tarefas/${task.id}`); revalidatePath("/acompanhamento");
@@ -102,7 +102,7 @@ export async function moveTaskFromKanban(formData: FormData) {
 export async function updateProjectStatus(formData: FormData) {
   const parsed = projectStatusSchema.safeParse({ projectId: formData.get("projectId"), status: formData.get("status") });
   if (!parsed.success) redirect("/tarefas?error=Projeto+inválido");
-  await prisma.actionPlan.updateMany({ where: { id: parsed.data.projectId, companyId: DEV_COMPANY_ID, status: { notIn: ["DRAFT", "CANCELLED"] } }, data: { status: parsed.data.status } });
+  await prisma.actionPlan.updateMany({ where: { id: parsed.data.projectId, companyId: (await requireAuth()).companyId, status: { notIn: ["DRAFT", "CANCELLED"] } }, data: { status: parsed.data.status } });
   revalidatePath("/dashboard"); revalidatePath("/tarefas"); revalidatePath("/acompanhamento");
   redirect(parsed.data.status === "ACTIVE" ? `/tarefas?project=${parsed.data.projectId}` : "/tarefas");
 }
@@ -120,7 +120,7 @@ export async function updateTaskStatus(formData: FormData) {
   const task = await prisma.task.findFirst({
     where: {
       id: parsed.data.taskId,
-      companyId: DEV_COMPANY_ID,
+      companyId: (await requireAuth()).companyId,
       actionPlan: { status: "ACTIVE" },
     },
     select: { id: true, actionPlanId: true, status: true },

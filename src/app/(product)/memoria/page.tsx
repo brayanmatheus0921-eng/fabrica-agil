@@ -1,4 +1,5 @@
-﻿import type { Metadata } from "next";
+import { requireAuth } from "@/server/auth";
+import type { Metadata } from "next";
 import { ReadingDetails } from "@/components/reading-layout";
 import {
   Brain,
@@ -10,7 +11,6 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard, StatusPill } from "@/components/ui";
-import { DEV_COMPANY_ID } from "@/core/development";
 import { prisma } from "@/lib/prisma";
 
 export const metadata: Metadata = {
@@ -48,7 +48,7 @@ export const dynamic = "force-dynamic";
 
 export default async function MemoryPage() {
   const memories = await prisma.companyMemory.findMany({
-    where: { companyId: DEV_COMPANY_ID, invalidatedAt: null },
+    where: { companyId: (await requireAuth()).companyId, invalidatedAt: null },
     orderBy: { updatedAt: "desc" },
     take: 50,
     select: {

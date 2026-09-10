@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu, MessageSquareText, X } from "lucide-react";
+import { LogOut, Menu, MessageSquareText, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
@@ -8,6 +8,7 @@ import { DesktopNavigation } from "@/components/app-navigation";
 import { BrandMark } from "@/components/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { cn } from "@/lib/cn";
+import { logout } from "@/app/auth-actions";
 
 const pageNames: Record<string, string> = {
   dashboard: "Visão geral",
@@ -22,7 +23,7 @@ const pageNames: Record<string, string> = {
   memoria: "Histórico",
 };
 
-export function AppShell({ children, companyName, onboardingComplete }: { children: ReactNode; companyName: string; onboardingComplete: boolean }) {
+export function AppShell({ children, companyName, userName, onboardingComplete }: { children: ReactNode; companyName: string; userName: string; onboardingComplete: boolean }) {
   const pathname = usePathname();
   const segment = pathname.split("/").filter(Boolean)[0] ?? "dashboard";
   const pageName = pageNames[segment] ?? "Fábrica Ágil";
@@ -55,6 +56,9 @@ export function AppShell({ children, companyName, onboardingComplete }: { childr
             <p className="text-xs font-semibold">Tudo conectado</p>
             <p className="mt-1 text-[10px] leading-4 text-muted">Diagnóstico, projetos, arquivos e conversas no mesmo contexto.</p>
           </div>
+          <form action={logout} className="sidebar-expanded-only mt-2">
+            <button className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs text-muted transition hover:bg-surface-muted hover:text-foreground"><LogOut className="size-4" />Sair de {userName}</button>
+          </form>
         </div>
       </aside>
 
@@ -71,6 +75,9 @@ export function AppShell({ children, companyName, onboardingComplete }: { childr
               <p className="mt-2 truncate text-sm font-semibold">{companyName}</p>
             </div>
             <DesktopNavigation />
+            <form action={logout} className="mt-5 border-t pt-4">
+              <button className="flex w-full items-center gap-2 rounded-xl px-3 py-3 text-sm text-muted"><LogOut className="size-4" />Sair de {userName}</button>
+            </form>
           </div>
         </aside>
       </div>

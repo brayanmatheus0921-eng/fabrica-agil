@@ -1,5 +1,6 @@
-﻿"use server";
+"use server";
 
+import { requireAuth } from "@/server/auth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
@@ -26,7 +27,6 @@ import {
   getDiagnosticSequence,
   getNextDiagnosticSequence,
 } from "@/core/diagnostic-history";
-import { DEV_COMPANY_ID } from "@/core/development";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 
@@ -103,7 +103,7 @@ export async function startEnterpriseTriage() {
 
   let session = await prisma.diagnosticSession.findFirst({
     where: {
-      companyId: DEV_COMPANY_ID,
+      companyId: (await requireAuth()).companyId,
       templateId: template.id,
       status: { in: ["DRAFT", "IN_PROGRESS"] },
     },
@@ -113,7 +113,7 @@ export async function startEnterpriseTriage() {
   if (!session) {
     const existingSessions = await prisma.diagnosticSession.findMany({
       where: {
-        companyId: DEV_COMPANY_ID,
+        companyId: (await requireAuth()).companyId,
         status: { not: "CANCELLED" },
       },
       select: { title: true },
@@ -121,7 +121,7 @@ export async function startEnterpriseTriage() {
     const startedAt = new Date();
     session = await prisma.diagnosticSession.create({
       data: {
-        companyId: DEV_COMPANY_ID,
+        companyId: (await requireAuth()).companyId,
         templateId: template.id,
         title: buildDiagnosticTitle({
           sequence: getNextDiagnosticSequence(
@@ -170,7 +170,7 @@ export async function saveEnterpriseTriageAnswer(formData: FormData) {
   const session = await prisma.diagnosticSession.findFirst({
     where: {
       id: sessionId,
-      companyId: DEV_COMPANY_ID,
+      companyId: (await requireAuth()).companyId,
       template: {
         code: ENTERPRISE_TRIAGE_CODE,
         domain: "ENTERPRISE",
@@ -328,7 +328,7 @@ export async function saveEnterpriseFollowUp(formData: FormData) {
   const session = await prisma.diagnosticSession.findFirst({
     where: {
       id: sessionId,
-      companyId: DEV_COMPANY_ID,
+      companyId: (await requireAuth()).companyId,
       template: {
         code: ENTERPRISE_TRIAGE_CODE,
         domain: "ENTERPRISE",
@@ -394,7 +394,7 @@ export async function saveEnterpriseTieBreaker(formData: FormData) {
   const session = await prisma.diagnosticSession.findFirst({
     where: {
       id: sessionId,
-      companyId: DEV_COMPANY_ID,
+      companyId: (await requireAuth()).companyId,
       template: { code: ENTERPRISE_TRIAGE_CODE },
       status: { in: ["DRAFT", "IN_PROGRESS"] },
     },
@@ -445,7 +445,7 @@ export async function finishEnterpriseTriage(formData: FormData) {
   const session = await prisma.diagnosticSession.findFirst({
     where: {
       id: sessionId,
-      companyId: DEV_COMPANY_ID,
+      companyId: (await requireAuth()).companyId,
       template: { code: ENTERPRISE_TRIAGE_CODE },
       status: { in: ["DRAFT", "IN_PROGRESS"] },
     },
@@ -541,7 +541,7 @@ export async function finishEnterpriseTriage(formData: FormData) {
     getDiagnosticSequence(session.title) ??
     (await prisma.diagnosticSession.count({
       where: {
-        companyId: DEV_COMPANY_ID,
+        companyId: (await requireAuth()).companyId,
         createdAt: { lte: session.createdAt },
       },
     }));
@@ -598,7 +598,7 @@ export async function continueWithEnterpriseInvestigation(formData: FormData) {
   const session = await prisma.diagnosticSession.findFirst({
     where: {
       id: sessionId,
-      companyId: DEV_COMPANY_ID,
+      companyId: (await requireAuth()).companyId,
       status: "COMPLETED",
       template: {
         code: ENTERPRISE_TRIAGE_CODE,
@@ -621,7 +621,7 @@ export async function continueWithEnterpriseInvestigation(formData: FormData) {
 
   await prisma.company.updateMany({
     where: {
-      id: DEV_COMPANY_ID,
+      id: (await requireAuth()).companyId,
       onboardingStatus: "IN_PROGRESS",
     },
     data: { onboardingStatus: "COMPLETED" },

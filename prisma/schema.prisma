@@ -149,11 +149,34 @@ model User {
   id               String                @id @default(cuid())
   name             String?
   email            String                @unique
+  authSessions     AuthSession[]
   memberships      CompanyMembership[]
   assignedLessons  LessonAssignment[]
   authoredMessages ConversationMessage[]
   createdAt        DateTime              @default(now())
   updatedAt        DateTime              @updatedAt
+}
+
+model AuthSession {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model LoginThrottle {
+  key             String   @id
+  attempts        Int      @default(0)
+  windowStartedAt DateTime @default(now())
+  blockedUntil    DateTime?
+  updatedAt       DateTime @updatedAt
+
+  @@index([blockedUntil])
 }
 
 model Company {

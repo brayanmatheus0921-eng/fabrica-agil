@@ -1,4 +1,5 @@
-﻿import type { Metadata } from "next";
+import { requireAuth } from "@/server/auth";
+import type { Metadata } from "next";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -26,7 +27,6 @@ import {
   parseDiagnosticPillars,
   type DiagnosticPillarResult,
 } from "@/core/diagnostic-history";
-import { DEV_COMPANY_ID } from "@/core/development";
 import {
   getBottleneckCopy,
   parseMethodSteps,
@@ -115,7 +115,7 @@ export default async function DiagnosticsPage({
     searchParams,
     prisma.diagnosticSession.findMany({
       where: {
-        companyId: DEV_COMPANY_ID,
+        companyId: (await requireAuth()).companyId,
         status: { not: "CANCELLED" },
         template: { domain: "OPERATIONS" },
       },

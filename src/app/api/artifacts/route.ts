@@ -1,6 +1,6 @@
+import { requireAuth } from "@/server/auth";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { DEV_COMPANY_ID } from "@/core/development";
 import { sameOrigin } from "@/server/ai/chat-generation";
 import { artifactContext, artifactSelect, artifactView, validateArtifactLinks } from "@/server/artifacts";
 import { generateCanvas } from "@/server/ai/artifact-agent";
@@ -14,8 +14,8 @@ export async function GET(request: Request) {
   const query = Object.fromEntries(new URL(request.url).searchParams);
   const scope = scopeSchema.safeParse(query);
   if (!scope.success) return Response.json({ error: "Contexto inválido." }, { status: 400 });
-  const artifacts = await prisma.workspaceArtifact.findMany({ where: { companyId: DEV_COMPANY_ID, ...scope.data }, select: artifactSelect, orderBy: { updatedAt: "desc" }, take: 100 });
-  const tasks = await prisma.task.findMany({ where: { companyId: DEV_COMPANY_ID, actionPlan: { status: { in: ["ACTIVE", "DRAFT"] } } }, select: { id: true, title: true }, orderBy: { sortOrder: "asc" } });
+  const artifacts = await prisma.workspaceArtifact.findMany({ where: { companyId: (await requireAuth()).companyId, ...scope.data }, select: artifactSelect, orderBy: { updatedAt: "desc" }, take: 100 });
+  const tasks = await prisma.task.findMany({ where: { companyId: (await requireAuth()).companyId, actionPlan: { status: { in: ["ACTIVE", "DRAFT"] } } }, select: { id: true, title: true }, orderBy: { sortOrder: "asc" } });
   return Response.json({ artifacts: artifacts.map(artifactView), tasks });
 }
 export async function POST(request: Request) {
@@ -37,18 +37,18 @@ export async function POST(request: Request) {
         const artifact = await prisma.workspaceArtifact.findUniqueOrThrow({ where: { id: duplicate.id }, select: artifactSelect });
         return Response.json({ artifact: artifactView(artifact), reused: true });
       }
-      const artifact = await prisma.workspaceArtifact.create({ data: { companyId: DEV_COMPANY_ID, ...scope, kind: "UPLOAD", title: originalName, originalName, mimeType, fileData: bytes }, select: artifactSelect });
+      const artifact = await prisma.workspaceArtifact.create({ data: { companyId: (await requireAuth()).companyId, ...scope, kind: "UPLOAD", title: originalName, originalName, mimeType, fileData: bytes }, select: artifactSelect });
       return Response.json({ artifact: artifactView(artifact) }, { status: 201 });
     }
     const body = scopeSchema.extend({ prompt: z.string().trim().min(1).max(2000) }).parse(await request.json());
     const context = await artifactContext(body.taskId, body.threadId);
     const content = await generateCanvas(body.prompt, context, AbortSignal.any([request.signal, AbortSignal.timeout(120000)]));
-    const duplicate = await findReusableCanvas({ title: content.title, kind: content.kind, taskId: body.taskId, threadId: body.threadId });
+    const duplicate = await findReusableCanvas({ companyId: (await requireAuth()).companyId, title: content.title, kind: content.kind, taskId: body.taskId, threadId: body.threadId });
     if (duplicate) {
       const artifact = await prisma.workspaceArtifact.findUniqueOrThrow({ where: { id: duplicate.id }, select: artifactSelect });
       return Response.json({ artifact: artifactView(artifact), reused: true });
     }
-    const artifact = await prisma.workspaceArtifact.create({ data: { companyId: DEV_COMPANY_ID, taskId: body.taskId, threadId: body.threadId, kind: content.kind, title: content.title, content }, select: artifactSelect });
+    const artifact = await prisma.workspaceArtifact.create({ data: { companyId: (await requireAuth()).companyId, taskId: body.taskId, threadId: body.threadId, kind: content.kind, title: content.title, content }, select: artifactSelect });
     return Response.json({ artifact: artifactView(artifact) }, { status: 201 });
   } catch (e) {
     console.error("Artifact create:", e instanceof Error ? e.name : "error");

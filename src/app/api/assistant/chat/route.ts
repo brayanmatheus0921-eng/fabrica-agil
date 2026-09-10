@@ -1,10 +1,10 @@
+import { requireAuth } from "@/server/auth";
 import { Agent, run, tool } from "@openai/agents";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { env } from "@/lib/env";
-import { DEV_COMPANY_ID, DEV_USER_ID } from "@/core/development";
 import { applyWorkshopPatch, readWorkshop, executableWorkshopPatchSchema, WORKSHOP_STAGES, type WorkshopStage } from "@/core/coo-workshop";
 import { loadCompanyContext } from "@/server/ai/company-context";
 import { INDUSTRIAL_CONSULTANT_INSTRUCTIONS } from "@/server/ai/prompt";
@@ -20,6 +20,7 @@ export const maxDuration = 180;
 const inputSchema = z.object({ threadId: z.string().min(1).max(200), requestId: z.string().uuid(), message: z.string().trim().min(1).max(6000) });
 
 export async function POST(request: Request) {
+  const auth = await requireAuth();
   if (!sameOrigin(request)) return new Response(null, { status: 403 });
   const parsed = inputSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Escreva uma mensagem de até 6.000 caracteres." }, { status: 400 });
@@ -35,20 +36,20 @@ export async function POST(request: Request) {
     if (requestedThreadId === "new") {
       const cleanTitle = message.replace(/\s+/g, " ").trim();
       const created = await tx.conversationThread.create({ data: {
-        companyId: DEV_COMPANY_ID,
+        companyId: auth.companyId,
         title: cleanTitle.length > 72 ? `${cleanTitle.slice(0, 69)}…` : cleanTitle,
         generationId: requestId,
         generationStartedAt: new Date(),
       }, select: { id: true } });
       targetThreadId = created.id;
     } else {
-      const lock = await tx.conversationThread.updateMany({ where: { id: requestedThreadId, companyId: DEV_COMPANY_ID,
+      const lock = await tx.conversationThread.updateMany({ where: { id: requestedThreadId, companyId: auth.companyId,
         OR: [{ generationId: null }, { generationStartedAt: { lt: new Date(Date.now() - 180_000) } }] },
         data: { generationId: requestId, generationStartedAt: new Date() } });
       if (!lock.count) return null;
     }
     if (await tx.conversationMessage.findUnique({ where: { id: userId } })) throw new Error("Mensagem já recebida.");
-    await tx.conversationMessage.create({ data: { id: userId, threadId: targetThreadId, authorUserId: DEV_USER_ID, role: "USER", content: message } });
+    await tx.conversationMessage.create({ data: { id: userId, threadId: targetThreadId, authorUserId: auth.userId, role: "USER", content: message } });
     return targetThreadId;
   }).catch(() => null);
   if (!lockedThreadId) return Response.json({ error: "Aguarde a resposta atual terminar. Sua mensagem não foi reenviada." }, { status: 409 });
@@ -63,12 +64,12 @@ export async function POST(request: Request) {
       try {
         emit({ type: "ack", userId, assistantId, threadId });
         emit({ type: "activity", text: "Consultando o diagnóstico e o contexto salvo…" });
-        const thread = await prisma.conversationThread.findFirstOrThrow({ where: { id: threadId, companyId: DEV_COMPANY_ID }, include: { messages: { orderBy: { createdAt: "desc" }, take: 40 } } });
+        const thread = await prisma.conversationThread.findFirstOrThrow({ where: { id: threadId, companyId: auth.companyId }, include: { messages: { orderBy: { createdAt: "desc" }, take: 40 } } });
         const current = readWorkshop(thread.workflowState);
         let proposed = current;
         let canvasDraft: { mode: "CREATE" | "REPLACE"; existingId?: string; taskId: string | null; content: CanvasContent } | { mode: "REUSE"; existingId: string; title: string } | null = null;
-        const context = await loadCompanyContext(DEV_COMPANY_ID);
-        const diagnosis = current ? await prisma.diagnosticSession.findFirst({ where: { id: current.diagnosticId, companyId: DEV_COMPANY_ID, status: "COMPLETED" }, include: { answers: { include: { question: true } } } }) : null;
+        const context = await loadCompanyContext(auth.companyId);
+        const diagnosis = current ? await prisma.diagnosticSession.findFirst({ where: { id: current.diagnosticId, companyId: auth.companyId, status: "COMPLETED" }, include: { answers: { include: { question: true } } } }) : null;
         if (current && !diagnosis) throw new Error("Diagnóstico indisponível");
         const methods = await prisma.improvementMethod.findMany({ where: { status: "ACTIVE" }, include: { versions: { where: { publishedAt: { not: null } }, orderBy: { version: "desc" }, take: 1 } } });
         const catalog = methods.filter(m => m.versions.length).map(m => ({ code: m.code, name: m.name, description: m.description, steps: m.versions[0].steps }));
@@ -90,8 +91,8 @@ export async function POST(request: Request) {
         const skill = current ? await readFile(path.join(process.cwd(), "docs/ai/skills/coo-plano-colaborativo/SKILL.md"), "utf8") : "";
         const createCanvas = tool({ name: "criar_ferramenta_canvas", description: "Cria ou reutiliza no Canvas uma planilha ou documento editável pedido ou aceito pelo gestor. Para uma ferramenta repetida, use REUSE. Se o usuário pedir funções novas e já existir uma versão, primeiro pergunte se deseja manter a antiga ou substituí-la; só depois use KEEP_BOTH ou REPLACE conforme a resposta. Não altera tarefas ou aprovações. " + CANVAS_INSTRUCTIONS, parameters: canvasSchema.extend({ taskId: z.string().nullable(), duplicateHandling: z.enum(["REUSE", "KEEP_BOTH", "REPLACE"]) }), execute: async raw => {
           const content = validateCanvas(raw);
-          if (raw.taskId && !await prisma.task.findFirst({ where: { id: raw.taskId, companyId: DEV_COMPANY_ID, ...(current?.planId ? {actionPlanId: current.planId} : {}) } })) return "Tarefa inválida. Use uma tarefa deste plano ou null.";
-          const existing = await findReusableCanvas({ title: content.title, kind: content.kind, taskId: raw.taskId, threadId });
+          if (raw.taskId && !await prisma.task.findFirst({ where: { id: raw.taskId, companyId: auth.companyId, ...(current?.planId ? {actionPlanId: current.planId} : {}) } })) return "Tarefa inválida. Use uma tarefa deste plano ou null.";
+          const existing = await findReusableCanvas({ companyId: auth.companyId, title: content.title, kind: content.kind, taskId: raw.taskId, threadId });
           if (existing && raw.duplicateHandling === "REUSE") {
             canvasDraft = { mode: "REUSE", existingId: existing.id, title: existing.title };
             return `A ferramenta ${existing.title} já existia e será reutilizada. Não foi criada uma cópia.`;
@@ -107,9 +108,9 @@ export async function POST(request: Request) {
         // Selected diagnosis is authoritative; historical model prose is not matrix evidence.
         const snapshot = diagnosis?.resultSnapshot && typeof diagnosis.resultSnapshot === "object" ? { ...diagnosis.resultSnapshot as object } as Record<string, unknown> : null;
         if (snapshot) { delete snapshot.analysis; delete snapshot.analysisError; }
-        const selectedPlan = current?.planId ? await prisma.actionPlan.findFirst({ where: { id: current.planId, companyId: DEV_COMPANY_ID }, include: { tasks: { include: { evidence: { orderBy: { createdAt: "desc" }, take: 100 } } }, checkins: { orderBy: { createdAt: "desc" }, take: 5 } } }) : null;
-        const progressPlan = selectedPlan ?? (!current ? await prisma.actionPlan.findFirst({ where: { companyId: DEV_COMPANY_ID, status: "ACTIVE" }, orderBy: { createdAt: "desc" }, include: { tasks: { include: { evidence: true } } } }) : null);
-        const artifacts = await prisma.workspaceArtifact.findMany({ where: { companyId: DEV_COMPANY_ID, OR: [{threadId}, ...(progressPlan ? [{taskId: {in: progressPlan.tasks.map(t=>t.id)}}] : [])] }, select: {id:true,title:true,taskId:true,kind:true,confirmedAt:true,interpretation:true}, orderBy:{updatedAt:"desc"},take:30 });
+        const selectedPlan = current?.planId ? await prisma.actionPlan.findFirst({ where: { id: current.planId, companyId: auth.companyId }, include: { tasks: { include: { evidence: { orderBy: { createdAt: "desc" }, take: 100 } } }, checkins: { orderBy: { createdAt: "desc" }, take: 5 } } }) : null;
+        const progressPlan = selectedPlan ?? (!current ? await prisma.actionPlan.findFirst({ where: { companyId: auth.companyId, status: "ACTIVE" }, orderBy: { createdAt: "desc" }, include: { tasks: { include: { evidence: true } } } }) : null);
+        const artifacts = await prisma.workspaceArtifact.findMany({ where: { companyId: auth.companyId, OR: [{threadId}, ...(progressPlan ? [{taskId: {in: progressPlan.tasks.map(t=>t.id)}}] : [])] }, select: {id:true,title:true,taskId:true,kind:true,confirmedAt:true,interpretation:true}, orderBy:{updatedAt:"desc"},take:30 });
         const automaticProgress = progressPlan ? taskProgress(progressPlan.tasks, artifacts) : null;
         const scopedContext = current ? { company: context.company, selectedPlan, memories: context.memories, note: "Use exclusivamente o diagnóstico selecionado abaixo. Memórias são contexto histórico, não substituem a matriz." } : context;
         const input = JSON.stringify({ context: scopedContext, automaticProgress, artifacts: artifacts.map(a=>({...a, interpretation:a.confirmedAt?a.interpretation:null, notice:a.confirmedAt?"Leitura confirmada pelo usuário; não prova independente.":"Rascunho ou leitura pendente; não usar como resultado."})), workshop: current, diagnosis: diagnosis ? { id: diagnosis.id, title: diagnosis.title, matrix: snapshot, answers: diagnosis.answers.map(a => ({ code: a.question.code, question: a.question.prompt, value: a.value, notes: a.notes })) } : null, methods: catalog, messages: [...thread.messages].reverse().map(m => ({ id: m.id, role: m.role, content: m.content })) });
@@ -124,19 +125,19 @@ export async function POST(request: Request) {
         if (controller.signal.aborted || !text.trim()) throw new Error("Resposta interrompida ou vazia");
         const saved = await prisma.$transaction(async tx => {
           if (current) {
-            const source = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "DiagnosticSession" WHERE id = ${current.diagnosticId} AND "companyId" = ${DEV_COMPANY_ID} FOR UPDATE`;
+            const source = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "DiagnosticSession" WHERE id = ${current.diagnosticId} AND "companyId" = ${auth.companyId} FOR UPDATE`;
             if (!source.length) throw new Error("O diagnóstico foi excluído durante a conversa.");
           }
           await tx.$queryRaw`SELECT id FROM "ConversationThread" WHERE id = ${threadId} FOR UPDATE`;
-          const fresh = await tx.conversationThread.findFirst({ where: { id: threadId, companyId: DEV_COMPANY_ID, generationId: requestId } });
+          const fresh = await tx.conversationThread.findFirst({ where: { id: threadId, companyId: auth.companyId, generationId: requestId } });
           if (!fresh || controller.signal.aborted) throw new Error("Resposta interrompida");
-          if (proposed && proposed !== current) proposed = await persistWorkshopPlan(tx, DEV_COMPANY_ID, threadId, proposed);
+          if (proposed && proposed !== current) proposed = await persistWorkshopPlan(tx, auth.companyId, threadId, proposed);
           const createdCanvas = !canvasDraft ? null
             : canvasDraft.mode === "REUSE"
               ? { id: canvasDraft.existingId, title: canvasDraft.title }
               : canvasDraft.mode === "REPLACE" && canvasDraft.existingId
                 ? await tx.workspaceArtifact.update({ where: { id: canvasDraft.existingId }, data: { threadId, taskId: canvasDraft.taskId, kind: canvasDraft.content.kind, title: canvasDraft.content.title, content: canvasDraft.content, interpretation: undefined, confirmedAt: null, revision: { increment: 1 } }, select: { id: true, title: true } })
-                : await tx.workspaceArtifact.create({ data: { companyId: DEV_COMPANY_ID, threadId, taskId: canvasDraft.taskId, kind: canvasDraft.content.kind, title: canvasDraft.content.title, content: canvasDraft.content }, select: { id: true, title: true } });
+                : await tx.workspaceArtifact.create({ data: { companyId: auth.companyId, threadId, taskId: canvasDraft.taskId, kind: canvasDraft.content.kind, title: canvasDraft.content.title, content: canvasDraft.content }, select: { id: true, title: true } });
           await tx.conversationMessage.create({ data: { id: assistantId, threadId, role: "ASSISTANT", content: text, metadata: { requestId } } });
           await tx.conversationThread.update({ where: { id: threadId }, data: { lastMessageAt: new Date(), generationId: null, generationStartedAt: null, ...(proposed ? { workflowState: proposed as never } : {}) } });
           return { state: proposed, artifact: createdCanvas ? { ...createdCanvas, operation: canvasDraft?.mode ?? "CREATE" } : null };

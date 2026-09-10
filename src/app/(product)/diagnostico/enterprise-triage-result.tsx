@@ -1,4 +1,5 @@
-﻿import Link from "next/link";
+import { requireAuth } from "@/server/auth";
+import Link from "next/link";
 import {
   ArrowRight,
   BarChart3,
@@ -23,7 +24,6 @@ import {
   getDiagnosticAnswerLabel,
   getDiagnosticFlowHref,
 } from "@/core/diagnostic-history";
-import { DEV_COMPANY_ID } from "@/core/development";
 import { prisma } from "@/lib/prisma";
 import { startDiagnostic } from "./actions";
 
@@ -61,7 +61,7 @@ export async function EnterpriseTriageResult({
   const session = await prisma.diagnosticSession.findFirst({
     where: {
       id: sessionId,
-      companyId: DEV_COMPANY_ID,
+      companyId: (await requireAuth()).companyId,
       status: "COMPLETED",
       template: { domain: "ENTERPRISE" },
     },

@@ -1,10 +1,10 @@
+import { requireAuth } from "@/server/auth";
 import { prisma } from "@/lib/prisma";
-import { DEV_COMPANY_ID } from "@/core/development";
 import { validateCanvas } from "@/core/workspace-artifacts";
 import { exportCanvas } from "@/server/artifact-files";
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const row = await prisma.workspaceArtifact.findFirst({ where: { id, companyId: DEV_COMPANY_ID } });
+  const row = await prisma.workspaceArtifact.findFirst({ where: { id, companyId: (await requireAuth()).companyId } });
   if (!row) return new Response(null, { status: 404 });
   try {
     const format = new URL(request.url).searchParams.get("format") ?? "original";

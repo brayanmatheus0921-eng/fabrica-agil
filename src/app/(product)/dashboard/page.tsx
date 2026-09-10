@@ -1,4 +1,5 @@
-﻿import type { Metadata } from "next";
+import { requireAuth } from "@/server/auth";
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ReadingDetails } from "@/components/reading-layout";
 import { cooPlanSchema } from "@/core/coo-workshop";
@@ -17,7 +18,6 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard, StatusPill } from "@/components/ui";
-import { DEV_COMPANY_ID } from "@/core/development";
 import { getBottleneckCopy } from "@/core/guided-journey";
 import { prisma } from "@/lib/prisma";
 import { getDevCompany } from "@/server/dev-company";
@@ -51,7 +51,7 @@ export default async function DashboardPage() {
   const [diagnostic, assessment, activePlans, memoryCount] = await Promise.all([
     prisma.diagnosticSession.findFirst({
       where: {
-        companyId: DEV_COMPANY_ID,
+        companyId: (await requireAuth()).companyId,
         status: "COMPLETED",
         template: { domain: "OPERATIONS" },
       },
@@ -69,7 +69,7 @@ export default async function DashboardPage() {
       },
     }),
     prisma.bottleneckAssessment.findFirst({
-      where: { companyId: DEV_COMPANY_ID, status: "ACTIVE" },
+      where: { companyId: (await requireAuth()).companyId, status: "ACTIVE" },
       orderBy: { detectedAt: "desc" },
       include: {
         recommendations: {
@@ -86,7 +86,7 @@ export default async function DashboardPage() {
       },
     }),
     prisma.actionPlan.findMany({
-      where: { companyId: DEV_COMPANY_ID, status: "ACTIVE" },
+      where: { companyId: (await requireAuth()).companyId, status: "ACTIVE" },
       orderBy: { updatedAt: "desc" },
       include: {
         tasks: { where: { status: { not: "CANCELLED" } }, orderBy: { sortOrder: "asc" } },
@@ -94,7 +94,7 @@ export default async function DashboardPage() {
       },
     }),
     prisma.companyMemory.count({
-      where: { companyId: DEV_COMPANY_ID, invalidatedAt: null },
+      where: { companyId: (await requireAuth()).companyId, invalidatedAt: null },
     }),
   ]);
 

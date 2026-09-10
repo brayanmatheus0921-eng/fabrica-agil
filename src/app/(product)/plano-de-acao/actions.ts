@@ -1,9 +1,9 @@
-﻿"use server";
+"use server";
 
+import { requireAuth } from "@/server/auth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { DEV_COMPANY_ID, DEV_MEMBERSHIP_ID } from "@/core/development";
 import {
   parseMethodSteps,
   parseStringList,
@@ -22,6 +22,7 @@ function addDays(date: Date, days: number) {
 }
 
 export async function createDraftPlan(formData: FormData) {
+  const auth = await requireAuth();
   const parsed = recommendationSchema.safeParse({
     recommendationId: formData.get("recommendationId"),
   });
@@ -33,7 +34,7 @@ export async function createDraftPlan(formData: FormData) {
   const recommendation = await prisma.methodRecommendation.findFirst({
     where: {
       id: parsed.data.recommendationId,
-      companyId: DEV_COMPANY_ID,
+      companyId: auth.companyId,
       status: { in: ["PROPOSED", "ACCEPTED"] },
     },
     include: {
@@ -74,14 +75,14 @@ export async function createDraftPlan(formData: FormData) {
       ? (recommendation.methodVersion.requiredInputs as Record<string, unknown>)
       : {};
   const membership = await prisma.companyMembership.findFirst({
-    where: { id: DEV_MEMBERSHIP_ID, companyId: DEV_COMPANY_ID },
+    where: { id: auth.membershipId, companyId: auth.companyId },
     select: { id: true },
   });
 
   await prisma.$transaction(async (transaction) => {
     await transaction.actionPlan.create({
       data: {
-        companyId: DEV_COMPANY_ID,
+        companyId: auth.companyId,
         recommendationId: recommendation.id,
         title: `Rascunho de ${windowDays} dias: ${recommendation.methodVersion.method.name}`,
         objective: recommendation.methodVersion.method.description,
@@ -104,7 +105,7 @@ export async function createDraftPlan(formData: FormData) {
         },
         tasks: {
           create: steps.map((step, index) => ({
-            companyId: DEV_COMPANY_ID,
+            companyId: auth.companyId,
             assigneeMembershipId: membership?.id ?? undefined,
             title: step.title,
             description: `${step.description}\n\nComo comprovar: ${step.requiredEvidence}\nIndicador: ${step.indicator}`,
@@ -129,12 +130,13 @@ export async function createDraftPlan(formData: FormData) {
 }
 
 export async function approveActionPlan(formData: FormData) {
+  const auth = await requireAuth();
   const parsed = z.object({ planId: z.string().min(1) }).safeParse({
     planId: formData.get("planId"),
   });
   if (!parsed.success) redirect("/plano-de-acao?error=Rascunho+inválido");
 
-  const activated = await prisma.$transaction((tx) => activateDraftPlan(tx, DEV_COMPANY_ID, parsed.data.planId));
+  const activated = await prisma.$transaction((tx) => activateDraftPlan(tx, auth.companyId, parsed.data.planId));
   if (!activated) redirect(`/plano-de-acao?id=${parsed.data.planId}&error=Plano+já+aprovado+ou+indisponível`);
   revalidatePath("/dashboard");
   revalidatePath("/gargalo");

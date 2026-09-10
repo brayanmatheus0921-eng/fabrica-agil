@@ -1,8 +1,8 @@
-﻿"use server";
+"use server";
 
+import { requireAuth } from "@/server/auth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { DEV_COMPANY_ID } from "@/core/development";
 import {
   calculateRota30Confidence,
   calculateRota30Pillars,
@@ -56,7 +56,7 @@ export async function startDiagnostic(formData?: FormData) {
     ? await prisma.diagnosticSession.findFirst({
         where: {
           id: requestedOriginSessionId,
-          companyId: DEV_COMPANY_ID,
+          companyId: (await requireAuth()).companyId,
           status: "COMPLETED",
           template: { domain: "ENTERPRISE" },
         },
@@ -75,7 +75,7 @@ export async function startDiagnostic(formData?: FormData) {
 
   let session = await prisma.diagnosticSession.findFirst({
     where: {
-      companyId: DEV_COMPANY_ID,
+      companyId: (await requireAuth()).companyId,
       templateId: template.id,
       status: { in: ["DRAFT", "IN_PROGRESS"] },
       ...(originSessionId ? { originSessionId } : {}),
@@ -86,7 +86,7 @@ export async function startDiagnostic(formData?: FormData) {
   if (!session) {
     const existingSessions = await prisma.diagnosticSession.findMany({
       where: {
-        companyId: DEV_COMPANY_ID,
+        companyId: (await requireAuth()).companyId,
         status: { not: "CANCELLED" },
       },
       select: { title: true },
@@ -94,7 +94,7 @@ export async function startDiagnostic(formData?: FormData) {
     const startedAt = new Date();
     session = await prisma.diagnosticSession.create({
       data: {
-        companyId: DEV_COMPANY_ID,
+        companyId: (await requireAuth()).companyId,
         templateId: template.id,
         originSessionId,
         title: buildDiagnosticTitle({
@@ -140,7 +140,7 @@ export async function saveDiagnosticAnswer(formData: FormData) {
   const session = await prisma.diagnosticSession.findFirst({
     where: {
       id: sessionId,
-      companyId: DEV_COMPANY_ID,
+      companyId: (await requireAuth()).companyId,
       template: { code: ROTA30_METHOD_CODE },
       status: { in: ["DRAFT", "IN_PROGRESS"] },
     },
@@ -186,7 +186,7 @@ export async function saveDiagnosticAnswer(formData: FormData) {
 export async function saveAdaptivePriority(formData: FormData) {
   const sessionId = String(formData.get("sessionId") ?? "");
   const selectedPillar = String(formData.get("selectedPillar") ?? "");
-  const session = await prisma.diagnosticSession.findFirst({ where: { id: sessionId, companyId: DEV_COMPANY_ID, template: { code: ROTA30_METHOD_CODE } } });
+  const session = await prisma.diagnosticSession.findFirst({ where: { id: sessionId, companyId: (await requireAuth()).companyId, template: { code: ROTA30_METHOD_CODE } } });
   if (!session) redirect("/diagnostico/novo");
   const snapshot = asRecord(session.resultSnapshot);
   const adaptive = asRecord(snapshot.adaptive);
@@ -218,7 +218,7 @@ export async function saveAdaptiveImpact(formData: FormData) {
         : "/diagnostico/novo",
     );
   }
-  const session = await prisma.diagnosticSession.findFirst({ where: { id: sessionId, companyId: DEV_COMPANY_ID, template: { code: ROTA30_METHOD_CODE } } });
+  const session = await prisma.diagnosticSession.findFirst({ where: { id: sessionId, companyId: (await requireAuth()).companyId, template: { code: ROTA30_METHOD_CODE } } });
   if (!session) redirect("/diagnostico/novo");
   const snapshot = asRecord(session.resultSnapshot);
   const adaptive = asRecord(snapshot.adaptive);
@@ -241,7 +241,7 @@ export async function finishRota30Diagnostic(formData: FormData) {
   }
 
   const session = await prisma.diagnosticSession.findFirst({
-    where: { id: sessionId, companyId: DEV_COMPANY_ID, template: { code: ROTA30_METHOD_CODE }, status: { in: ["DRAFT", "IN_PROGRESS"] } },
+    where: { id: sessionId, companyId: (await requireAuth()).companyId, template: { code: ROTA30_METHOD_CODE }, status: { in: ["DRAFT", "IN_PROGRESS"] } },
     include: { answers: { include: { question: { select: { pillar: true } } } }, template: true },
   });
   if (!session) redirect("/diagnostico/novo");
@@ -279,12 +279,12 @@ export async function finishRota30Diagnostic(formData: FormData) {
   if (!abstained && !methodVersion) throw new Error("Método de melhoria não publicado.");
 
   await prisma.$transaction(async (transaction) => {
-    await transaction.bottleneckAssessment.updateMany({ where: { companyId: DEV_COMPANY_ID, status: "ACTIVE" }, data: { status: "MONITORING" } });
-    await transaction.methodRecommendation.updateMany({ where: { companyId: DEV_COMPANY_ID, status: "PROPOSED" }, data: { status: "SUPERSEDED" } });
+    await transaction.bottleneckAssessment.updateMany({ where: { companyId: (await requireAuth()).companyId, status: "ACTIVE" }, data: { status: "MONITORING" } });
+    await transaction.methodRecommendation.updateMany({ where: { companyId: (await requireAuth()).companyId, status: "PROPOSED" }, data: { status: "SUPERSEDED" } });
 
     const bottleneck = await transaction.bottleneckAssessment.create({
       data: {
-        companyId: DEV_COMPANY_ID,
+        companyId: (await requireAuth()).companyId,
         diagnosticSessionId: session.id,
         category: selectedPillar,
         title: abstained ? `Hipótese a confirmar: ${selectedPillar}` : `Oportunidade: ${selectedPillar}`,
@@ -302,7 +302,7 @@ export async function finishRota30Diagnostic(formData: FormData) {
     if (methodVersion) {
       await transaction.methodRecommendation.create({
         data: {
-          companyId: DEV_COMPANY_ID,
+          companyId: (await requireAuth()).companyId,
           diagnosticSessionId: session.id,
           bottleneckId: bottleneck.id,
           methodVersionId: methodVersion.id,
@@ -322,7 +322,7 @@ export async function finishRota30Diagnostic(formData: FormData) {
             getDiagnosticSequence(session.title) ??
             (await transaction.diagnosticSession.count({
               where: {
-                companyId: DEV_COMPANY_ID,
+                companyId: (await requireAuth()).companyId,
                 createdAt: { lte: session.createdAt },
               },
             })),
@@ -347,7 +347,7 @@ export async function finishRota30Diagnostic(formData: FormData) {
     });
     await transaction.company.updateMany({
       where: {
-        id: DEV_COMPANY_ID,
+        id: (await requireAuth()).companyId,
         onboardingStatus: "IN_PROGRESS",
       },
       data: { onboardingStatus: "COMPLETED" },
@@ -372,7 +372,7 @@ export async function deleteDiagnostic(formData: FormData) {
   const session = await prisma.diagnosticSession.findFirst({
     where: {
       id: sessionId,
-      companyId: DEV_COMPANY_ID,
+      companyId: (await requireAuth()).companyId,
     },
     select: { id: true },
   });
@@ -380,10 +380,10 @@ export async function deleteDiagnostic(formData: FormData) {
   if (!session) redirect("/diagnostico");
 
   await prisma.$transaction(async (transaction) => {
-    await transaction.$queryRaw`SELECT id FROM "DiagnosticSession" WHERE id = ${session.id} AND "companyId" = ${DEV_COMPANY_ID} FOR UPDATE`;
+    await transaction.$queryRaw`SELECT id FROM "DiagnosticSession" WHERE id = ${session.id} AND "companyId" = ${(await requireAuth()).companyId} FOR UPDATE`;
     const recommendations = await transaction.methodRecommendation.findMany({
       where: {
-        companyId: DEV_COMPANY_ID,
+        companyId: (await requireAuth()).companyId,
         OR: [
           { diagnosticSessionId: session.id },
           { bottleneck: { diagnosticSessionId: session.id } },
@@ -398,7 +398,7 @@ export async function deleteDiagnostic(formData: FormData) {
       (recommendation) => recommendation.id,
     );
       const directPlans = await transaction.actionPlan.findMany({
-        where: { companyId: DEV_COMPANY_ID, baseline: { path: ["diagnosticSessionId"], equals: session.id } },
+        where: { companyId: (await requireAuth()).companyId, baseline: { path: ["diagnosticSessionId"], equals: session.id } },
         select: { id: true },
       });
       const actionPlanIds = [...new Set([...directPlans.map((plan) => plan.id), ...recommendations.flatMap((recommendation) =>
@@ -469,12 +469,12 @@ export async function deleteDiagnostic(formData: FormData) {
     });
     await transaction.companyMemory.deleteMany({
       where: {
-        companyId: DEV_COMPANY_ID,
+        companyId: (await requireAuth()).companyId,
         sourceType: "DIAGNOSTIC",
         sourceId: session.id,
       },
     });
-    await transaction.conversationThread.deleteMany({ where: { companyId: DEV_COMPANY_ID, workflowState: { path: ["diagnosticId"], equals: session.id } } });
+    await transaction.conversationThread.deleteMany({ where: { companyId: (await requireAuth()).companyId, workflowState: { path: ["diagnosticId"], equals: session.id } } });
     await transaction.diagnosticSession.delete({
       where: { id: session.id },
     });

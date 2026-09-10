@@ -1,7 +1,7 @@
+import { requireAuth } from "@/server/auth";
 import "server-only";
 
 import type { CanvasContent } from "@/core/workspace-artifacts";
-import { DEV_COMPANY_ID } from "@/core/development";
 import { prisma } from "@/lib/prisma";
 
 function normalizedTitle(value: string) {
@@ -9,11 +9,13 @@ function normalizedTitle(value: string) {
 }
 
 export async function findReusableCanvas({
+  companyId,
   title,
   kind,
   taskId,
   threadId,
 }: {
+  companyId: string;
   title: string;
   kind: CanvasContent["kind"];
   taskId?: string | null;
@@ -21,7 +23,7 @@ export async function findReusableCanvas({
 }) {
   const candidates = await prisma.workspaceArtifact.findMany({
     where: {
-      companyId: DEV_COMPANY_ID,
+      companyId,
       kind,
       ...(taskId ? { taskId } : threadId ? { threadId, taskId: null } : { taskId: null, threadId: null }),
     },
@@ -43,7 +45,7 @@ export async function findDuplicateUpload({
   bytes: Buffer;
 }) {
   const candidates = await prisma.workspaceArtifact.findMany({
-    where: { companyId: DEV_COMPANY_ID, taskId, kind: "UPLOAD", originalName },
+    where: { companyId: (await requireAuth()).companyId, taskId, kind: "UPLOAD", originalName },
     orderBy: { updatedAt: "desc" },
     take: 20,
     select: { id: true, fileData: true },

@@ -1,8 +1,8 @@
 "use server";
+import { requireAuth } from "@/server/auth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { DEV_COMPANY_ID } from "@/core/development";
 import { prisma } from "@/lib/prisma";
 import { readWorkshop } from "@/core/coo-workshop";
 export async function startNewConversation() {
@@ -15,7 +15,7 @@ export async function renameConversation(formData: FormData) {
   }).safeParse({ threadId: formData.get("threadId"), title: formData.get("title") });
   if (!parsed.success) redirect("/assistente?error=Informe+um+nome+válido");
   const renamed = await prisma.conversationThread.updateMany({
-    where: { id: parsed.data.threadId, companyId: DEV_COMPANY_ID, generationId: null },
+    where: { id: parsed.data.threadId, companyId: (await requireAuth()).companyId, generationId: null },
     data: { title: parsed.data.title },
   });
   if (!renamed.count) redirect(`/assistente?chat=${parsed.data.threadId}&error=Não+foi+possível+editar+agora`);
@@ -25,8 +25,8 @@ export async function renameConversation(formData: FormData) {
 export async function deleteConversation(formData: FormData) {
   const threadId = z.string().min(1).safeParse(formData.get("threadId"));
   if (!threadId.success) redirect("/assistente?error=Conversa+inválida");
-  const thread = await prisma.conversationThread.findFirst({ where: { id: threadId.data, companyId: DEV_COMPANY_ID } });
+  const thread = await prisma.conversationThread.findFirst({ where: { id: threadId.data, companyId: (await requireAuth()).companyId } });
   if (readWorkshop(thread?.workflowState)?.planId) redirect(`/assistente?chat=${threadId.data}&error=Esta+conversa+guarda+as+decisões+do+plano.+Para+limpar+o+ciclo,+exclua+o+diagnóstico+correspondente.`);
-  await prisma.conversationThread.deleteMany({ where: { id: threadId.data, companyId: DEV_COMPANY_ID, generationId: null } });
+  await prisma.conversationThread.deleteMany({ where: { id: threadId.data, companyId: (await requireAuth()).companyId, generationId: null } });
   revalidatePath("/assistente"); redirect("/assistente");
 }

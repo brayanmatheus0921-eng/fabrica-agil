@@ -1,9 +1,9 @@
-﻿"use server";
+"use server";
 
+import { requireAuth } from "@/server/auth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { DEV_COMPANY_ID, DEV_MEMBERSHIP_ID } from "@/core/development";
 import { prisma } from "@/lib/prisma";
 import { loadCompanyContext } from "@/server/ai/company-context";
 import { runIndustrialConsultant } from "@/server/ai/consultant-agent";
@@ -37,7 +37,7 @@ export async function submitProgressCheckin(formData: FormData) {
   if (!parsed.success) redirect("/acompanhamento?error=Preencha+o+que+foi+feito,+o+resultado+e+a+evidência");
 
   const checkin = await prisma.progressCheckin.findFirst({
-    where: { id: parsed.data.checkinId, companyId: DEV_COMPANY_ID, status: "OPEN", actionPlan: { status: "ACTIVE" } },
+    where: { id: parsed.data.checkinId, companyId: (await requireAuth()).companyId, status: "OPEN", actionPlan: { status: "ACTIVE" } },
     include: { actionPlan: true },
   });
   if (!checkin || !checkin.actionPlanId) redirect("/acompanhamento?error=Check-in+não+encontrado");
@@ -45,7 +45,7 @@ export async function submitProgressCheckin(formData: FormData) {
   let aiEvaluation = "Check-in salvo. O consultor poderá revisar esta evidência na próxima conversa.";
   let nextPriority = "Continue pela primeira tarefa ativa do plano.";
   try {
-    const context = await loadCompanyContext(DEV_COMPANY_ID);
+    const context = await loadCompanyContext((await requireAuth()).companyId);
     const response = await runIndustrialConsultant({
       message: `Avalie este check-in do ciclo ROTA 30. Fato executado: ${parsed.data.summary}. Resultado observado: ${parsed.data.observedOutcome}. Bloqueios: ${parsed.data.blockers || "nenhum informado"}. Evidência: ${parsed.data.evidence}. Diga se há progresso verificável e indique somente a próxima prioridade.`,
       context,
@@ -64,7 +64,7 @@ export async function submitProgressCheckin(formData: FormData) {
       where: { id: checkin.id },
       data: {
         status: "SUBMITTED",
-        submittedByMembershipId: DEV_MEMBERSHIP_ID,
+        submittedByMembershipId: (await requireAuth()).membershipId,
         summary: parsed.data.summary,
         observedOutcome: parsed.data.observedOutcome,
         blockers: parsed.data.blockers || null,
@@ -75,7 +75,7 @@ export async function submitProgressCheckin(formData: FormData) {
     });
     await transaction.evidenceOutput.create({
       data: {
-        companyId: DEV_COMPANY_ID,
+        companyId: (await requireAuth()).companyId,
         checkinId: checkin.id,
         type: "NOTE",
         label: `Evidência do check-in ${sequence}`,
@@ -86,7 +86,7 @@ export async function submitProgressCheckin(formData: FormData) {
     if (sequence < 8) {
       await transaction.progressCheckin.create({
         data: {
-          companyId: DEV_COMPANY_ID,
+          companyId: (await requireAuth()).companyId,
           actionPlanId: checkin.actionPlanId,
           status: "OPEN",
           metricSnapshot: { sequence: sequence + 1, week: Math.ceil((sequence + 1) / 2), dueAt: addDays(now, sequence % 2 === 1 ? 4 : 3).toISOString(), type: "EXECUTION" },

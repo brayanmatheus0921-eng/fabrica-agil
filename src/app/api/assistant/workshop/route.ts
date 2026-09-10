@@ -1,5 +1,5 @@
+import { requireAuth } from "@/server/auth";
 import { prisma } from "@/lib/prisma";
-import { DEV_COMPANY_ID } from "@/core/development";
 import { readWorkshop, revisitWorkshop, type WorkshopStage } from "@/core/coo-workshop";
 import { sameOrigin } from "@/server/ai/chat-generation";
 export async function POST(request: Request) {
@@ -8,7 +8,7 @@ export async function POST(request: Request) {
     const { threadId, stage } = await request.json();
     const state = await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM "ConversationThread" WHERE id = ${String(threadId)} FOR UPDATE`;
-      const thread = await tx.conversationThread.findFirst({ where: { id: String(threadId), companyId: DEV_COMPANY_ID } });
+      const thread = await tx.conversationThread.findFirst({ where: { id: String(threadId), companyId: (await requireAuth()).companyId } });
       const current = readWorkshop(thread?.workflowState);
       if (!thread || !current || thread.generationId) throw new Error("Aguarde a resposta terminar.");
       const updated = revisitWorkshop(current, stage as WorkshopStage);

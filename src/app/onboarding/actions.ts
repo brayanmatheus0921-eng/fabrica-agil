@@ -1,12 +1,12 @@
-﻿"use server";
+"use server";
 
+import { requireAuth } from "@/server/auth";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
   companyProfileQuestions,
   type CompanyProfileQuestionKey,
 } from "@/core/company-profile";
-import { DEV_COMPANY_ID } from "@/core/development";
 import { prisma } from "@/lib/prisma";
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -54,7 +54,7 @@ export async function saveOnboardingStep(formData: FormData) {
   }
 
   const company = await prisma.company.findUniqueOrThrow({
-    where: { id: DEV_COMPANY_ID },
+    where: { id: (await requireAuth()).companyId },
   });
   const field = companyProfileQuestions[question - 1];
   const key = field.key as CompanyProfileQuestionKey;
@@ -80,16 +80,16 @@ export async function saveOnboardingStep(formData: FormData) {
     data.sector = company.sector ?? "Fábrica de móveis";
   }
 
-  await prisma.company.update({ where: { id: DEV_COMPANY_ID }, data });
+  await prisma.company.update({ where: { id: (await requireAuth()).companyId }, data });
 
   if (question === companyProfileQuestions.length) {
     const saved = await prisma.company.findUniqueOrThrow({
-      where: { id: DEV_COMPANY_ID },
+      where: { id: (await requireAuth()).companyId },
     });
     const content = buildProfileMemory(saved);
     const existing = await prisma.companyMemory.findFirst({
       where: {
-        companyId: DEV_COMPANY_ID,
+        companyId: (await requireAuth()).companyId,
         sourceType: "ONBOARDING",
         sourceId: "company-profile",
         invalidatedAt: null,
@@ -103,7 +103,7 @@ export async function saveOnboardingStep(formData: FormData) {
     } else {
       await prisma.companyMemory.create({
         data: {
-          companyId: DEV_COMPANY_ID,
+          companyId: (await requireAuth()).companyId,
           kind: "FACT",
           sourceType: "ONBOARDING",
           sourceId: "company-profile",

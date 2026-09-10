@@ -1,9 +1,9 @@
-﻿"use server";
+"use server";
 
+import { requireAuth } from "@/server/auth";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { DEV_COMPANY_ID } from "@/core/development";
 import { prisma } from "@/lib/prisma";
 
 const schema = z.object({
@@ -34,7 +34,7 @@ export async function updateCompanyProfile(formData: FormData) {
   }
   const data = parsed.data;
   const current = await prisma.company.findUniqueOrThrow({
-    where: { id: DEV_COMPANY_ID },
+    where: { id: (await requireAuth()).companyId },
     select: { onboardingData: true },
   });
   const previous = asRecord(current.onboardingData);
@@ -75,7 +75,7 @@ export async function updateCompanyProfile(formData: FormData) {
 
   await prisma.$transaction(async (transaction) => {
     await transaction.company.update({
-      where: { id: DEV_COMPANY_ID },
+      where: { id: (await requireAuth()).companyId },
       data: {
         name: data.name,
         sector: data.sector,
@@ -87,7 +87,7 @@ export async function updateCompanyProfile(formData: FormData) {
     });
     const memory = await transaction.companyMemory.findFirst({
       where: {
-        companyId: DEV_COMPANY_ID,
+        companyId: (await requireAuth()).companyId,
         sourceType: "ONBOARDING",
         sourceId: "company-profile",
         invalidatedAt: null,
@@ -101,7 +101,7 @@ export async function updateCompanyProfile(formData: FormData) {
     } else {
       await transaction.companyMemory.create({
         data: {
-          companyId: DEV_COMPANY_ID,
+          companyId: (await requireAuth()).companyId,
           kind: "FACT",
           sourceType: "ONBOARDING",
           sourceId: "company-profile",

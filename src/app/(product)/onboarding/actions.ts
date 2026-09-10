@@ -1,9 +1,9 @@
-﻿"use server";
+"use server";
 
+import { requireAuth } from "@/server/auth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { DEV_COMPANY_ID } from "@/core/development";
 import type { OnboardingFormState } from "@/core/onboarding";
 import { prisma } from "@/lib/prisma";
 
@@ -60,7 +60,7 @@ export async function saveOnboarding(
 
   await prisma.$transaction(async (transaction) => {
     await transaction.company.update({
-      where: { id: DEV_COMPANY_ID },
+      where: { id: (await requireAuth()).companyId },
       data: {
         name: data.name,
         sector: data.sector,
@@ -77,7 +77,7 @@ export async function saveOnboarding(
 
     const existingMemory = await transaction.companyMemory.findFirst({
       where: {
-        companyId: DEV_COMPANY_ID,
+        companyId: (await requireAuth()).companyId,
         sourceType: "ONBOARDING",
         sourceId: "company-profile",
         invalidatedAt: null,
@@ -106,7 +106,7 @@ export async function saveOnboarding(
     } else {
       await transaction.companyMemory.create({
         data: {
-          companyId: DEV_COMPANY_ID,
+          companyId: (await requireAuth()).companyId,
           kind: "FACT",
           sourceType: "ONBOARDING",
           sourceId: "company-profile",
