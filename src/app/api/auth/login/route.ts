@@ -13,7 +13,11 @@ const LIMIT = 5;
 const WINDOW_MS = 15 * 60 * 1000;
 
 function throttleKeys(request: NextRequest, email: string) {
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? request.headers.get("x-real-ip") ?? "unknown";
+  const forwarded = request.headers.get("x-forwarded-for")
+    ?.split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const ip = request.headers.get("x-real-ip")?.trim() || forwarded?.at(-1) || "unknown";
   return [
     createHash("sha256").update(`ip|${ip}`).digest("hex"),
     createHash("sha256").update(`email|${email}`).digest("hex"),
