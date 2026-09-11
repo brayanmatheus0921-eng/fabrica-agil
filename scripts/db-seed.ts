@@ -24,15 +24,6 @@ const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString }),
 });
 
-const TEST_ACCOUNTS = ["Mateus", "Anny", "Poker", "Evaldo", "Brayan"].map(
-  (name) => ({
-    name,
-    email: `${name.toLowerCase()}@faba.com`,
-    userId: `test-user-${name.toLowerCase()}`,
-    companyId: `test-company-${name.toLowerCase()}`,
-    membershipId: `test-membership-${name.toLowerCase()}`,
-  }),
-);
 
 async function main() {
   await prisma.diagnosticTemplate.updateMany({
@@ -64,34 +55,6 @@ async function main() {
       ],
     },
   });
-
-  for (const account of TEST_ACCOUNTS) {
-    await prisma.user.upsert({
-      where: { email: account.email },
-      update: { name: account.name },
-      create: { id: account.userId, name: account.name, email: account.email },
-    });
-    await prisma.company.upsert({
-      where: { id: account.companyId },
-      update: {},
-      create: {
-        id: account.companyId,
-        name: "Minha fábrica",
-        onboardingStatus: "NOT_STARTED",
-      },
-    });
-    const user = await prisma.user.findUniqueOrThrow({ where: { email: account.email } });
-    await prisma.companyMembership.upsert({
-      where: { companyId_userId: { companyId: account.companyId, userId: user.id } },
-      update: { role: "OWNER" },
-      create: {
-        id: account.membershipId,
-        companyId: account.companyId,
-        userId: user.id,
-        role: "OWNER",
-      },
-    });
-  }
 
   const enterpriseTriage = ENTERPRISE_TRIAGE_METHOD;
   const enterpriseTemplate = await prisma.diagnosticTemplate.upsert({
@@ -354,8 +317,6 @@ async function main() {
   console.log(
     JSON.stringify({
       status: "ok",
-      accounts: TEST_ACCOUNTS.map(({ name, email, companyId }) => ({ name, email, companyId })),
-      environment: "test",
       diagnosticTemplate: diagnosticMethod.code,
       enterpriseTriage: enterpriseTriage.code,
       questions: diagnosticMethod.questions.length,

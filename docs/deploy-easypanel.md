@@ -16,7 +16,7 @@ O nome do projeto pode variar. O requisito é manter os dois serviços dentro do
 
 ## Limite de uso desta versão
 
-Esta versão ainda não possui login e usa uma única empresa fixa. Pode ser usada em teste controlado, preferencialmente com autenticação básica no Easypanel. Não deve receber clientes diferentes ou dados sensíveis até existir autenticação e separação por empresa.
+O login usa credenciais individuais fornecidas por variáveis privadas do servidor. Sem configuração válida, novos logins e sessões existentes são bloqueados. Consulte [recuperação de acesso](security-access-recovery.md) antes de liberar o ambiente.
 
 ## 1. Criar o PostgreSQL
 
@@ -77,6 +77,8 @@ PORT=3000
 DATABASE_URL=URL_INTERNA_DO_POSTGRES
 OPENAI_MODEL=gpt-5.6-luna
 OPENAI_API_KEY=CHAVE_DO_PROJETO
+AUTH_SESSION_SECRET=SEGREDO_ALEATORIO_DE_64_CARACTERES_HEXADECIMAIS
+AUTH_ACCESS_CREDENTIALS=JSON_PRIVADO_GERADO_PARA_AS_CONTAS
 ```
 
 Regras:
@@ -113,7 +115,7 @@ prisma migrate deploy
 → next start
 ```
 
-O seed usa atualizações idempotentes para cadastrar a empresa inicial, perguntas, métodos e versões. Ele não deve apagar respostas, diagnósticos, planos ou tarefas existentes.
+O seed atualiza perguntas, métodos e versões. Não cria contas de parceiros nem divulga seus e-mails. Ele não deve apagar respostas, diagnósticos, planos ou tarefas existentes.
 
 ## 6. Configurar o domínio
 
@@ -189,12 +191,12 @@ Deploy do aplicativo não apaga o banco. Destruir o serviço PostgreSQL, perder 
 ## 10. Segurança obrigatória
 
 - Mantenha o PostgreSQL privado e sem **Expose**.
-- Ative autenticação básica no domínio enquanto o produto não tiver login.
+- Não libere o login antes de configurar e validar as credenciais individuais.
 - Trate `DATABASE_URL`, `OPENAI_API_KEY` e o gatilho de implantação como senhas.
 - Não envie logs completos sem remover credenciais.
 - Se uma credencial aparecer em chat, print ou log compartilhado, revogue-a e gere outra.
 - Depois de expor o gatilho de implantação, use **Atualizar Token de Implantação**.
-- Não use dados reais de vários clientes nesta versão de empresa única.
+- Valide o isolamento por empresa antes de usar dados reais de clientes.
 
 ## 11. Erros encontrados no primeiro deploy
 
@@ -273,7 +275,7 @@ Antes de considerar um deploy concluído:
 - [ ] PostgreSQL não está exposto publicamente.
 - [ ] Fonte aponta para `brayanmatheus0921-eng/fabrica-agil`, ramo `main`.
 - [ ] Construção usa `Dockerfile` da raiz.
-- [ ] As cinco variáveis obrigatórias estão configuradas.
+- [ ] As variáveis obrigatórias, incluindo as duas de autenticação, estão configuradas.
 - [ ] O histórico mostra o commit esperado.
 - [ ] A construção Docker terminou com sucesso.
 - [ ] O contêiner iniciou sem reiniciar em ciclo.
@@ -282,5 +284,5 @@ Antes de considerar um deploy concluído:
 - [ ] Um dado persistiu após reiniciar `web`.
 - [ ] Backup do PostgreSQL está configurado e testado.
 - [ ] Credenciais expostas foram substituídas.
-- [ ] Acesso público está protegido enquanto não existir login.
+- [ ] Código legado e sessões anteriores são rejeitados; novo acesso individual foi validado.
 

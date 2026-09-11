@@ -19,7 +19,7 @@ Versão atual: **v0.1.0-beta.1**.
 - Modelo de dados versiona templates de diagnóstico e métodos.
 - Contratos Zod validam o método de diagnóstico e as respostas estruturadas do COO.
 - PostgreSQL local para desenvolvimento e deploy persistente preparado para Easypanel.
-- Empresa fixa sem login para validar o fluxo antes da autenticação.
+- Autenticação por credencial individual no servidor, sessões revogáveis e isolamento por empresa.
 - Onboarding persistente que gera a primeira memória estruturada da empresa.
 - O arquivo de ambiente local não é versionado.
 
@@ -138,3 +138,7 @@ Para criar ou atualizar o ambiente da VPS, siga o [processo oficial de deploy no
 - A chave da OpenAI e outras variáveis locais não fazem parte do versionamento.
 - A versão atual não pode ser publicada para clientes reais antes de autenticação.
 - Migrações destrutivas não devem ser aplicadas ao banco da VPS sem revisão e backup.
+
+## Configuração segura de acesso
+
+O login exige `AUTH_SESSION_SECRET` e `AUTH_ACCESS_CREDENTIALS`, sem valores padrão. Siga [a recuperação de acesso](docs/security-access-recovery.md). O seed não cria contas de parceiros; os usuários e seus vínculos existentes são preservados.

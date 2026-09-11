@@ -56,10 +56,6 @@ export function LoginForm() {
     setError("");
     if (step === "email") {
       const normalizedEmail = email.trim().toLowerCase();
-      if (!normalizedEmail.endsWith("@faba.com")) {
-        setError("Digite seu e-mail de acesso.");
-        return;
-      }
       setEmail(normalizedEmail);
       setStep("code");
       return;

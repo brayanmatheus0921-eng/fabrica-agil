@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { createAuthSession, TEST_ACCESS_CODE } from "@/server/auth";
+import { readAccessConfig, verifyAccessCode } from "@/core/access-credentials";
+import { createAuthSession } from "@/server/auth";
 
 const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
@@ -50,6 +51,10 @@ async function recordFailure(keys: string[], now: Date) {
 }
 
 export async function POST(request: NextRequest) {
+  const config = readAccessConfig(process.env);
+  if (!config) {
+    return NextResponse.json({ error: "Acesso temporariamente indisponível." }, { status: 503 });
+  }
   const input = loginSchema.safeParse(await request.json().catch(() => null));
   const email = input.success ? input.data.email : "invalid";
   const keys = throttleKeys(request, email);
@@ -59,7 +64,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Muitas tentativas. Aguarde 15 minutos." }, { status: 429 });
   }
 
-  if (!input.success || input.data.code !== TEST_ACCESS_CODE) {
+  if (!input.success || !verifyAccessCode(config, input.data.email, input.data.code)) {
     await recordFailure(keys, now);
     return NextResponse.json({ error: "E-mail ou código incorreto." }, { status: 401 });
   }

@@ -1,17 +1,20 @@
 import "server-only";
 
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { AUTH_COOKIE_NAME, TEST_ACCESS_CODE } from "@/core/auth-config";
+import { AUTH_COOKIE_NAME } from "@/core/auth-config";
+import { readAccessConfig, sessionTokenHash } from "@/core/access-credentials";
 import { prisma } from "@/lib/prisma";
 
-export { AUTH_COOKIE_NAME, TEST_ACCESS_CODE };
+export { AUTH_COOKIE_NAME };
 const SESSION_DAYS = 30;
 
 function hashToken(token: string) {
-  return createHash("sha256").update(token).digest("hex");
+  const config = readAccessConfig(process.env);
+  if (!config) throw new Error("Authentication is not configured");
+  return sessionTokenHash(token, config);
 }
 
 export async function createAuthSession(userId: string) {
@@ -35,7 +38,7 @@ export async function createAuthSession(userId: string) {
 export async function deleteAuthSession() {
   const store = await cookies();
   const token = store.get(AUTH_COOKIE_NAME)?.value;
-  if (token) {
+  if (token && readAccessConfig(process.env)) {
     await prisma.authSession.deleteMany({ where: { tokenHash: hashToken(token) } });
   }
   store.delete(AUTH_COOKIE_NAME);
@@ -43,7 +46,7 @@ export async function deleteAuthSession() {
 
 export const getAuthContext = cache(async () => {
   const token = (await cookies()).get(AUTH_COOKIE_NAME)?.value;
-  if (!token) return null;
+  if (!token || !readAccessConfig(process.env)) return null;
 
   const session = await prisma.authSession.findUnique({
     where: { tokenHash: hashToken(token) },
