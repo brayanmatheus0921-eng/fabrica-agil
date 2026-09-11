@@ -1,6 +1,6 @@
 # Login — revisão visual e funcional
 
-final result: passed
+final result: passed (revisão histórica da interface; não valida a autenticação atual)
 
 ## Referências e evidências
 
@@ -40,7 +40,7 @@ Capturas feitas no navegador integrado. A comparação recebeu as imagens de ref
 - Código vazio apresenta erro local sem enviar requisição de autenticação.
 - Digitação, avanço de foco, edição de dígito, Backspace e colagem do código completo verificados no navegador.
 - Botão Confirmar e campos ficam bloqueados durante o envio.
-- Login válido com `123456` abre `/onboarding`. Os cinco e-mails de teste foram validados pela API local com sucesso.
+- Login válido com `[código legado revogado]` abre `/onboarding`. Os cinco e-mails de teste foram validados pela API local com sucesso.
 - Temas claro e escuro inspecionados; preferência de tema restaurada para claro ao terminar.
 - Viewports CSS 970 × 603, 390 × 844 e 320 × 568; nos dois tamanhos mobile, largura/altura do documento não excederam o viewport na tela de código.
 - Sem erros de console capturados na sessão de teste do login.
@@ -49,4 +49,4 @@ Capturas feitas no navegador integrado. A comparação recebeu as imagens de ref
 
 ## Escopo
 
-Interface do login, validação da API e código único dos acessos de teste. Rate limit, isolamento das empresas e redirecionamento existente foram preservados. A publicação é validada separadamente após o deploy.
+Registro histórico da interface do login e da antiga autenticação de teste. O mecanismo compartilhado foi substituído; consulte `docs/security-access-recovery.md`. Rate limit, isolamento das empresas e redirecionamento existente foram preservados. A publicação é validada separadamente após o deploy.
