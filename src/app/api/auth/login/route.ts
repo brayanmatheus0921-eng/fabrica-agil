@@ -6,7 +6,7 @@ import { createAuthSession, TEST_ACCESS_CODE } from "@/server/auth";
 
 const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
-  code: z.string().trim().length(4),
+  code: z.string().trim().regex(/^\d{6}$/),
 });
 
 const LIMIT = 5;

@@ -1,0 +1,202 @@
+.page {
+  position: relative;
+  display: flex;
+  min-height: 100dvh;
+  overflow: clip;
+  padding: clamp(36px, 10vh, 76px) 24px 40px;
+  background: var(--surface);
+  color: var(--foreground);
+}
+
+.watermark {
+  position: absolute;
+  top: 0;
+  left: 53%;
+  width: max(680px, 68vw);
+  height: max(680px, 68vw);
+  color: var(--background);
+  pointer-events: none;
+  transform: rotate(-14deg);
+}
+
+.content {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 448px;
+  margin-inline: auto;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 36px;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -1.2px;
+  line-height: 44px;
+}
+
+.brandIcon {
+  width: 42px;
+  height: 42px;
+  color: var(--primary);
+  stroke-width: 1.5;
+}
+
+.card {
+  width: 100%;
+  padding: 32px;
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 12px 40px rgb(50 48 38 / 8%);
+}
+
+.title {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+
+.description {
+  margin: 10px 0 24px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.emailLabel {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 400;
+}
+
+.emailInput,
+.digit {
+  border: 1px solid var(--login-input-border, var(--border));
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--foreground);
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.emailInput {
+  width: 100%;
+  height: 46px;
+  padding: 0 12px;
+  font-size: 16px;
+}
+
+.emailInput::placeholder { color: var(--muted); font-size: 13px; }
+.emailInput:focus,
+.digit:focus { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+
+.accountEmail {
+  overflow-wrap: anywhere;
+  margin: 30px 0;
+  font-size: 16px;
+  line-height: 24px;
+  text-align: center;
+}
+
+.codeGroup { min-width: 0; margin: 0; padding: 0; border: 0; }
+.codeLabel {
+  width: 100%;
+  padding: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.digits { display: flex; justify-content: center; gap: 10px; margin-top: 16px; }
+.digit {
+  width: 54px;
+  height: 56px;
+  padding: 0;
+  font-size: 24px;
+  font-weight: 400;
+  text-align: center;
+  caret-color: var(--primary);
+}
+
+.changeEmail {
+  display: block;
+  min-height: 44px;
+  margin: 10px auto 0;
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.submit {
+  display: flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--primary);
+  color: var(--primary-contrast);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 24px;
+  transition: background 150ms ease, transform 150ms ease;
+}
+
+.submit:hover:not(:disabled) { background: var(--primary-strong); }
+.submit:active:not(:disabled) { transform: translateY(1px); }
+.submit:disabled,
+.changeEmail:disabled,
+.digit:disabled { cursor: wait; opacity: 0.65; }
+.submit:focus-visible,
+.changeEmail:focus-visible { outline: 2px solid var(--primary); outline-offset: 4px; }
+.error { margin: 12px 0 0; color: var(--danger-foreground); font-size: 13px; line-height: 20px; }
+.step { animation: reveal 180ms ease-out; }
+.spinner { width: 16px; height: 16px; animation: spin 900ms linear infinite; }
+@keyframes reveal { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+:global(html[data-theme="dark"]) .page { background: var(--background); }
+:global(html[data-theme="dark"]) .watermark { color: var(--surface); }
+:global(html[data-theme="dark"]) .card {
+  --login-input-border: color-mix(in srgb, var(--muted) 65%, var(--surface));
+  box-shadow: 0 12px 40px rgb(0 0 0 / 18%);
+}
+
+@media (min-width: 900px) {
+  .content { margin-left: calc(50% - 305px); margin-right: 0; }
+}
+
+@media (max-width: 479px) {
+  .page { padding: 36px 16px 24px; }
+  .brand { margin-bottom: 28px; font-size: 28px; }
+  .card { padding: 28px 24px; }
+  .digits { gap: 8px; }
+  .digit { width: 42px; height: 52px; }
+  .watermark { left: 25%; opacity: 0.65; }
+}
+
+@media (max-width: 359px) {
+  .card { padding-inline: 20px; }
+  .digits { gap: 6px; }
+  .digit { width: 34px; height: 48px; font-size: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step, .spinner { animation: none; }
+  .emailInput, .digit, .submit { transition: none; }
+}
