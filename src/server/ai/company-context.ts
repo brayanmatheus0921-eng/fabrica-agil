@@ -159,6 +159,7 @@ export async function loadCompanyContext(companyId: string) {
           label: true,
           textValue: true,
           numericValue: true,
+          metadata: true,
           createdAt: true,
         },
       },
@@ -310,7 +311,7 @@ export async function loadCompanyContext(companyId: string) {
           })),
         }
       : null,
-    recentEvidence: company.evidence.map((evidence) => ({
+    recentEvidence: company.evidence.filter(evidence => !asRecord(evidence.metadata).voided).map((evidence) => ({
       ...evidence,
       numericValue:
         evidence.numericValue === null ? null : Number(evidence.numericValue),

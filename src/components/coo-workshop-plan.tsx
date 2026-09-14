@@ -16,13 +16,14 @@ export function CooWorkshopPlan({ outcome, tasks = [], status = "DRAFT" }: {
   const parsed = cooPlanSchema.safeParse(outcome);
   if (!parsed.success) return null;
   const initiatives = parsed.data.initiatives;
+  const pending = status === "DRAFT";
   const activeIndex = Math.min(selected, initiatives.length - 1);
   const item = initiatives[activeIndex];
   const offset = initiatives.slice(0, activeIndex).reduce((sum, initiative) => sum + initiative.actions.length, 0);
 
   return <section id="quadro-plano" className="scroll-mt-24 space-y-5">
     <div className="flex flex-wrap items-end justify-between gap-2">
-      <div><h2 className="text-lg font-semibold">Seu plano em uma página</h2><p className="mt-1 text-sm text-muted">Escolha uma iniciativa. Veja o combinado, depois abra a tarefa.</p></div>
+      <div><h2 className="text-lg font-semibold">{pending ? "Seu plano em uma página" : "5W2H original do plano"}</h2><p className="mt-1 text-sm text-muted">{pending ? "Escolha uma iniciativa. Veja o combinado, depois abra a tarefa." : "Referência do combinado na aprovação. Consulte nas tarefas os títulos, responsáveis, prazos e situações atuais."}</p></div>
       <span className="text-xs text-muted">{initiatives.length} {initiatives.length === 1 ? "iniciativa" : "iniciativas"}</span>
     </div>
     <div className="grid gap-2 sm:grid-cols-2 lg:flex" role="group" aria-label="Escolher iniciativa">
@@ -32,25 +33,25 @@ export function CooWorkshopPlan({ outcome, tasks = [], status = "DRAFT" }: {
     </div>
     <div id={panelId} key={activeIndex} className="space-y-4" aria-label={`Iniciativa ${activeIndex + 1}: ${item.title}`}>
       {item.actions.map((action, index) => {
-        const task = tasks[offset + index];
-        const due = task?.dueAt ? new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(task.dueAt)) : null;
+        // Draft tasks are generated in action order; approved tasks can move or change independently.
+        const task = pending ? tasks[offset + index] : undefined;
         const rows = [
           { label: "O que fazer", code: "What", icon: ListChecks, text: action.what },
           { label: "Por que fazer", code: "Why", icon: CircleHelp, text: action.why },
           { label: "Quem cuida", code: "Who", icon: UserRound, text: action.who },
-          { label: "Quando", code: "When", icon: CalendarDays, text: status === "DRAFT" ? `${action.whenDays} dias após a aprovação` : due ? `Prazo: ${due}` : `${action.whenDays} dias a partir da aprovação` },
+          { label: "Quando", code: "When", icon: CalendarDays, text: `${action.whenDays} dias após a aprovação${pending ? "" : " (prazo original)"}` },
           { label: "Onde", code: "Where", icon: MapPin, text: action.where },
           { label: "Como fazer", code: "How", icon: Target, text: action.how },
           { label: "Quanto custa", code: "How much", icon: Coins, text: action.howMuch },
         ];
         return <article key={index} className="overflow-hidden rounded-xl border border-[#dbe1e9] bg-white shadow-[0_2px_10px_rgba(11,19,32,0.03)]">
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e2e6eb] px-5 py-4 sm:px-6">
-            <div className="flex items-center gap-3"><span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#f5eee5] text-[#896340]"><ListChecks aria-hidden="true" className="size-5"/></span><div><h3 className="text-base font-semibold">Quadro 5W2H{item.actions.length > 1 ? ` · Ação ${index + 1}` : ""}</h3><p className="mt-1 text-xs text-muted">Sete respostas para executar sem adivinhar.</p></div></div>
-            {task ? <Link href={`/tarefas/${task.id}`} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[#d9e0e8] px-3 py-2 text-sm font-semibold hover:bg-[#f8fafc]">{status === "DRAFT" ? "Ver tarefa antes de aprovar" : "Abrir esta tarefa"}<ArrowUpRight aria-hidden="true" className="size-4"/></Link> : null}
+            <div className="flex items-center gap-3"><span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#f5eee5] text-[#896340]"><ListChecks aria-hidden="true" className="size-5"/></span><div><h3 className="text-base font-semibold">Quadro 5W2H{item.actions.length > 1 ? ` · Ação ${index + 1}` : ""}</h3><p className="mt-1 text-xs text-muted">{pending ? "Sete respostas para executar sem adivinhar." : "Instruções e metas originais, preservadas como referência."}</p></div></div>
+            {task ? <Link href={`/tarefas/${task.id}`} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[#d9e0e8] px-3 py-2 text-sm font-semibold hover:bg-[#f8fafc]">Ver tarefa antes de aprovar<ArrowUpRight aria-hidden="true" className="size-4"/></Link> : null}
           </header>
           <table className="hidden w-full table-fixed border-collapse text-left text-sm sm:table">
             <caption className="sr-only">5W2H de {item.title}, ação {index + 1}</caption>
-            <thead><tr className="bg-[#f5f7fa] text-xs text-[#596575]"><th scope="col" className="w-[210px] px-6 py-3 font-semibold">Definição</th><th scope="col" className="px-6 py-3 font-semibold">O combinado</th></tr></thead>
+            <thead><tr className="bg-[#f5f7fa] text-xs text-[#596575]"><th scope="col" className="w-[210px] px-6 py-3 font-semibold">Definição</th><th scope="col" className="px-6 py-3 font-semibold">{pending ? "O combinado" : "O combinado original"}</th></tr></thead>
             <tbody>{rows.map(({label,icon:Icon,text},rowIndex)=><tr key={label} className={rowIndex % 2 ? "bg-[#fafbfd]" : "bg-white"}><th scope="row" className="border-t border-[#e9edf2] px-6 py-4 align-top font-semibold"><span className="flex items-center gap-2.5"><Icon aria-hidden="true" className="size-4 shrink-0 text-[#788798]"/>{label}</span></th><td className="break-words border-t border-[#e9edf2] px-6 py-4 align-top font-normal leading-6 text-[#39485b]">{text}</td></tr>)}</tbody>
           </table>
           <dl className="divide-y divide-[#e9edf2] sm:hidden">{rows.map(({label,icon:Icon,text},rowIndex)=><div key={label} className={`px-5 py-4 ${rowIndex % 2 ? "bg-[#fafbfd]" : ""}`}><dt className="flex items-center gap-2 text-sm font-semibold text-primary"><Icon aria-hidden="true" className="size-3.5"/>{label}</dt><dd className="mt-2 break-words text-sm leading-6 text-[#39485b]">{text}</dd></div>)}</dl>

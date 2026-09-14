@@ -9,9 +9,19 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    ".next-stale-*/**",
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "backups/**",
+    ".artifacts/**",
+    "tmp/**",
+    "output/**",
+    "outputs/**",
+    "src/generated/**",
+    "fabrica-facil-scaffold/**",
+    "dev-postgres-data/**",
+    ".local-tools/**",
   ]),
 ]);
 

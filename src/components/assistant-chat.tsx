@@ -3,6 +3,8 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUpRight, Files, History, ListChecks, LoaderCircle, MoreHorizontal, PanelLeftOpen, Pencil, Plus, RefreshCw, Sparkles, Target, Trash2, X } from "lucide-react";
 import { ReadingDetails } from "@/components/reading-layout";
+import { AssistantProposals } from "@/components/assistant-proposals";
+import { approvalIntent, type CooProposalView } from "@/core/coo-actions";
 import { AssistantComposer } from "@/components/assistant-composer";
 import { ArtifactWorkspace } from "@/components/artifact-workspace";
 import { AssistantMarkdown } from "@/components/assistant-markdown";
@@ -49,6 +51,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
   const [state, setState] = useState(initialWorkshop), [panelOverride, setPanel] = useState<boolean | null>(null);
   const desktopHistory = useSyncExternalStore(subscribeDesktopHistory, readDesktopHistory, () => false);
   const panel = panelOverride ?? desktopHistory;
+  const [proposalRefresh, setProposalRefresh] = useState(0);
   const [canvasRefresh, setCanvasRefresh] = useState(0), [canvasPanel, setCanvasPanel] = useState(false);
   const [openArtifactId, setOpenArtifactId] = useState<string>();
   const canvasDirty = useRef(false);
@@ -80,6 +83,28 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
     // Synchronous guard: catches double Enter/click before React has rendered.
     if (busyRef.current || disabled || !text) return;
     busyRef.current = true; setBusy(true); setNotice(""); setActivity("Entendendo seu pedido…"); setDraft(""); follow.current = true;
+    const decision = approvalIntent(text);
+    if (decision && activeThreadIdRef.current !== "new") {
+      try {
+        const r = await fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadIdRef.current)}`);
+        if (!r.ok) throw Error("Não consegui conferir a proposta. Tente novamente.");
+        const data = await r.json();
+        const pending = (data.proposals as CooProposalView[]).filter(p=>p.status==="PENDING");
+        if (pending.length === 1) {
+          const response = await fetch("/api/assistant/proposals",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:pending[0].id,decision})});
+          const result = await response.json();
+          if(!response.ok) throw Error(result.error);
+          const p = result.proposal as CooProposalView;
+          const answer = p.result?.message ?? (p.status==="REJECTED"?"Proposta recusada. Nenhuma alteração foi feita.":"Esta proposta perdeu a validade. Peça uma nova revisão antes de confirmar.");
+          setMessages(old=>[...old,{id:crypto.randomUUID(),role:"USER",content:text},{id:crypto.randomUUID(),role:"ASSISTANT",content:answer}]);
+          const fresh = await fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadIdRef.current)}`).then(r=>r.json());
+          setState(fresh.workshop); setProposalRefresh(v=>v+1);setCanvasRefresh(v=>v+1);router.refresh();
+          busyRef.current=false;setBusy(false);setActivity("");return;
+        }
+      } catch(e) {
+        setNotice(e instanceof Error?e.message:"Não foi possível confirmar.");setDraft(text);busyRef.current=false;setBusy(false);setActivity("");return;
+      }
+    }
     const id = crypto.randomUUID(); requestId.current = id;
     pendingMessage.current = text;
     const controller = new AbortController(); abortRef.current = controller;
@@ -102,7 +127,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
           if (event.type === "ack") { ack = true; setActivity("Mensagem salva. Consultando o contexto…"); if (event.threadId && event.threadId !== activeThreadIdRef.current) { activeThreadIdRef.current = event.threadId; setActiveThreadId(event.threadId); const url = new URL(window.location.href); url.searchParams.set("chat", event.threadId); url.searchParams.delete("pergunta"); window.history.replaceState(null, "", url); } }
           if (event.type === "activity") setActivity(event.text);
           if (event.type === "delta") { received += event.text; setActivity("Respondendo…"); if (!frame) frame = setTimeout(flush, 40); }
-          if (event.type === "done") { finished = true; setState(event.state); if (event.artifact) { setCanvasRefresh(v => v + 1); setOpenArtifactId(event.artifact.id); setCanvasPanel(true); setPanel(false); setNotice(event.artifact.operation === "REUSE" ? `Ferramenta reutilizada: ${event.artifact.title}` : event.artifact.operation === "REPLACE" ? `Ferramenta atualizada: ${event.artifact.title}` : `Ferramenta criada: ${event.artifact.title}`); } }
+          if (event.type === "done") { setProposalRefresh(v=>v+1); finished = true; setState(event.state); if (event.artifact) { setCanvasRefresh(v => v + 1); setOpenArtifactId(event.artifact.id); setCanvasPanel(true); setPanel(false); setNotice(event.artifact.operation === "REUSE" ? `Ferramenta reutilizada: ${event.artifact.title}` : event.artifact.operation === "REPLACE" ? `Ferramenta atualizada: ${event.artifact.title}` : `Ferramenta criada: ${event.artifact.title}`); } }
           if (event.type === "error" || event.type === "stopped") { finished = true; setNotice(event.text); }
         }
       }
@@ -133,17 +158,18 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
     window.setTimeout(() => router.push(`/assistente?chat=${id}`), 130);
   }
 
-  return <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-white">
+  return <div className="coo-chat relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-white">
     <section className={`assistant-chat-pane flex min-w-0 flex-1 flex-col transition-[opacity,transform] duration-200 ease-out ${switchingChat ? "translate-y-1 opacity-0" : "translate-y-0 opacity-100"}`}>
       <header className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-3 sm:px-6">
-        <div className="flex min-w-0 items-center gap-3"><button type="button" onClick={() => { if (canvasDirty.current && !window.confirm("Descartar alterações não salvas?")) return; canvasDirty.current = false; setCanvasPanel(false); setPanel(!panel); }} aria-expanded={panel} aria-controls="assistant-details" aria-label="Abrir ou fechar histórico de conversas" title="Histórico de conversas" className="grid size-10 shrink-0 place-items-center rounded-xl border transition hover:bg-surface-muted"><PanelLeftOpen className={`size-4 transition-transform duration-200 ${panel ? "rotate-180" : ""}`} /></button><div className="min-w-0"><h1 className="text-sm font-semibold">COO</h1><p className="truncate text-xs text-muted">{state ? `Plano em conjunto · ${STAGE_LABELS[state.stage]}` : "Uma conversa de cada vez, no seu ritmo"}</p></div></div>
+        <div className="flex min-w-0 items-center gap-3"><button type="button" onClick={() => { if (canvasDirty.current && !window.confirm("Descartar alterações não salvas?")) return; canvasDirty.current = false; setCanvasPanel(false); setPanel(!panel); }} aria-expanded={panel} aria-controls="assistant-details" aria-label="Abrir ou fechar histórico de conversas" title="Histórico de conversas" className="grid size-10 shrink-0 place-items-center rounded-xl border transition hover:bg-surface-muted"><PanelLeftOpen className={`size-4 transition-transform duration-200 ${panel ? "rotate-180" : ""}`} /></button><div className="min-w-0"><h1 className="text-sm font-semibold">COO</h1><p className="truncate text-xs text-muted">{state ? `Plano em conjunto · ${STAGE_LABELS[state.stage]}` : "Seu consultor de operações"}</p></div></div>
         <div className="flex shrink-0 gap-2"><button type="button" disabled={busy} onClick={() => { if (canvasPanel && canvasDirty.current && !window.confirm("Descartar alterações não salvas?")) return; canvasDirty.current = false; setCanvasPanel(v => !v); setPanel(false); }} aria-expanded={canvasPanel} aria-controls="assistant-canvas" className="inline-flex min-h-10 items-center gap-2 rounded-lg border px-3 text-xs font-semibold transition hover:bg-surface-muted disabled:opacity-50"><Files className="size-4"/><span className="hidden sm:inline">Ferramentas e arquivos</span><span className="sm:hidden">Ferramentas</span></button></div>
       </header>
       {notice ? <div role="status" className="flex shrink-0 items-center justify-between gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900"><span>{notice}</span><button aria-label="Fechar aviso" onClick={() => setNotice("")}><X className="size-4" /></button></div> : null}
       {state?.stage === "REVIEW" && state.planId ? <a href={`/plano-de-acao?id=${state.planId}`} className="shrink-0 border-b bg-accent px-4 py-3 text-sm font-semibold">Plano pronto para sua revisão → Revisar e aprovar</a> : null}
-      <div ref={scroll} onScroll={() => { const node = scroll.current; if (node) { follow.current = node.scrollHeight - node.scrollTop - node.clientHeight < 90; setAway(!follow.current); } }} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-8">
+      <div ref={scroll} data-empty={!messages.length} onScroll={() => { const node = scroll.current; if (node) { follow.current = node.scrollHeight - node.scrollTop - node.clientHeight < 90; setAway(!follow.current); } }} className="coo-conversation min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-8">
         <div className="mx-auto flex max-w-3xl flex-col gap-6">
-          {!messages.length ? <div className="py-8 text-center sm:py-12"><p className="text-xl font-semibold tracking-tight">O que vamos resolver hoje?</p><p className="mt-2 text-sm text-muted">Escolha uma sugestão ou escreva do seu jeito.</p><div className="mx-auto mt-6 grid max-w-lg gap-2 text-left">{suggestions.slice(0, 3).map((suggestion) => { const Icon = suggestion.kind === "task" ? ListChecks : suggestion.kind === "review" ? RefreshCw : Target; return <button key={`${suggestion.kind}-${suggestion.label}`} type="button" onClick={() => setDraft(suggestion.label)} className="group flex min-h-11 items-center gap-3 rounded-xl border bg-surface px-3.5 py-2.5 text-[13px] leading-5 transition hover:border-primary/35 hover:bg-surface-muted"><Icon className="size-4 shrink-0 text-primary" /><span className="min-w-0 flex-1 truncate">{suggestion.label}</span><ArrowUpRight className="size-3.5 shrink-0 text-muted transition group-hover:text-primary" /></button>; })}</div></div> : messages.map((m, index) => <div key={m.id} className="contents">{busy && activity && m.role === "ASSISTANT" && index === messages.length - 1 ? <ThinkingStatus activity={activity} /> : null}<article aria-label={m.role === "USER" ? "Sua mensagem" : "Resposta do consultor"} className={m.role === "USER" ? "ml-auto max-w-[90%] rounded-2xl bg-surface-muted px-4 py-3 text-sm leading-6" : "max-w-full text-sm leading-7"}><AssistantMarkdown text={m.content} /></article></div>)}
+          {!messages.length ? <div className="coo-welcome py-8 text-center sm:py-12"><p className="coo-welcome-title">O que vamos fazer hoje?</p><p className="mt-2 text-sm text-muted">Converse com seu COO. Da decisão à execução, com sua aprovação.</p><div className="mx-auto mt-6 grid max-w-md gap-2 text-left">{suggestions.slice(0, 3).map((suggestion) => { const Icon = suggestion.kind === "task" ? ListChecks : suggestion.kind === "review" ? RefreshCw : Target; return <button key={`${suggestion.kind}-${suggestion.label}`} type="button" onClick={() => setDraft(suggestion.label)} className="group flex min-h-11 items-center gap-3 rounded-xl border bg-surface px-3.5 py-2.5 text-[13px] leading-5 transition hover:border-primary/35 hover:bg-surface-muted"><Icon className="size-4 shrink-0 text-primary" /><span className="min-w-0 flex-1 truncate">{suggestion.label}</span><ArrowUpRight className="size-3.5 shrink-0 text-muted transition group-hover:text-primary" /></button>; })}</div></div> : messages.map((m, index) => <div key={m.id} className="contents">{busy && activity && m.role === "ASSISTANT" && index === messages.length - 1 ? <ThinkingStatus activity={activity} /> : null}<article aria-label={m.role === "USER" ? "Sua mensagem" : "Resposta do consultor"} className={m.role === "USER" ? "ml-auto max-w-[90%] rounded-2xl bg-surface-muted px-4 py-3 text-sm leading-6" : "max-w-full text-sm leading-7"}><AssistantMarkdown text={m.content} /></article></div>)}
+          <AssistantProposals threadId={activeThreadId} refreshKey={proposalRefresh} busy={busy} onAdjust={text=>{setDraft(text); document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Mensagem para o consultor"]')?.focus();}} onApplied={()=>{setNotice("Ação aplicada com sua aprovação.");setCanvasRefresh(v=>v+1);router.refresh();fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadId)}`).then(r=>r.json()).then(data=>{if(data.workshop!==undefined)setState(data.workshop);}).catch(()=>{});}} />
           {busy && activity && messages.at(-1)?.role !== "ASSISTANT" ? <ThinkingStatus activity={activity} /> : null}
         </div>
       </div>

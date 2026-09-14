@@ -182,7 +182,6 @@ async function main() {
   } });
 
   const now = new Date();
-  const userIds = simulatedMessages.filter(m => m.role === "USER").map(m => m.id);
   const reviewState: WorkshopState = {
     skillVersion: 1, diagnosticId: newestDiagnostic.id, diagnosticTitle: "Diagnóstico 01 — Exemplo de fluxo e atrasos",
     stage: "REVIEW", revision: 6, furthestStage: 5, planId: null,

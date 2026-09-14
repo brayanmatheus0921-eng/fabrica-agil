@@ -180,6 +180,7 @@ model LoginThrottle {
 }
 
 model Company {
+  cooProposals      CooActionProposal[]
   artifacts         WorkspaceArtifact[]
   id                String                 @id @default(cuid())
   name              String
@@ -417,6 +418,7 @@ model Task {
   actionPlanId         String
   parentTaskId         String?
   assigneeMembershipId String?
+  ownerName            String?
   title                String
   description          String?
   expectedOutput       String?
@@ -553,6 +555,7 @@ model EvidenceOutput {
 }
 
 model ConversationThread {
+  cooProposals  CooActionProposal[]
   artifacts     WorkspaceArtifact[]
   id            String                @id @default(cuid())
   companyId     String
@@ -568,6 +571,39 @@ model ConversationThread {
   updatedAt     DateTime              @updatedAt
 
   @@index([companyId, status])
+}
+
+enum CooActionProposalStatus {
+  PENDING
+  APPLIED
+  REJECTED
+  EXPIRED
+  STALE
+}
+
+// Canonical action and preview are immutable after creation; decisions only change audit fields.
+model CooActionProposal {
+  id                  String                  @id @default(cuid())
+  companyId           String
+  threadId            String
+  sourceMessageId     String
+  proposedByUserId    String
+  decidedByUserId     String?
+  action              Json
+  expectedSnapshot    Json
+  summary             String
+  details             Json
+  dedupeKey           String?                 @unique
+  status              CooActionProposalStatus @default(PENDING)
+  result              Json?
+  expiresAt           DateTime
+  decidedAt           DateTime?
+  createdAt           DateTime                @default(now())
+  company             Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  thread              ConversationThread      @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, threadId, createdAt])
+  @@index([companyId, status, expiresAt])
 }
 
 model ConversationMessage {

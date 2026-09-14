@@ -1,5 +1,22 @@
 @import "tailwindcss";
 
+/* COO: quiet session sidebar, dotted workspace and centered composer. */
+.coo-chat { --border: #e5e3df; --surface: #faf9f7; --surface-muted: #f0eeea; }
+.coo-chat .coo-conversation { background-color: var(--surface); }
+.coo-chat .coo-conversation[data-empty="true"] { background-image: radial-gradient(#d9d7d2 0.65px, transparent 0.65px); background-size: 18px 18px; }
+.coo-chat .coo-conversation[data-empty="true"] > div { min-height: 100%; justify-content: center; }
+.coo-welcome-title { font-family: Georgia, "Times New Roman", serif; font-size: clamp(26px, 3vw, 36px); font-weight: 500; letter-spacing: -0.035em; line-height: 1.2; }
+.coo-chat #assistant-details { background: #f5f4f1; }
+.coo-chat #assistant-details .group.relative { border-color: transparent; border-radius: 8px; box-shadow: none; }
+.coo-chat #assistant-details .group.relative:has([aria-current="page"]) { background: #eae7e0; border-left: 2px solid var(--primary); }
+.coo-chat .coo-proposal { background: var(--surface); }
+.coo-chat article { overflow-wrap: anywhere; }
+.coo-chat header { background: var(--surface); }
+html[data-theme="dark"] .coo-chat { --border: #45443e; --surface: #20211d; --surface-muted: #2b2b25; }
+html[data-theme="dark"] .coo-chat #assistant-details { background: #1b1c18; }
+html[data-theme="dark"] .coo-chat #assistant-details .group.relative:has([aria-current="page"]) { background: #33342c; }
+html[data-theme="dark"] .coo-chat .coo-conversation[data-empty="true"] { background-image: radial-gradient(#44453e 0.65px, transparent 0.65px); }
+
 :root {
   color-scheme: light;
   --background: #f4f1ec;

@@ -6,6 +6,12 @@ export async function persistWorkshopPlan(tx: Prisma.TransactionClient, companyI
   const id = state.planId ?? `coo-plan-${threadId}`;
   const existing = await tx.actionPlan.findUnique({ where: { id } });
   if (existing && existing.status !== "DRAFT") throw new Error("Plano já aprovado; crie um novo ciclo para alterá-lo.");
+  if (existing) {
+    const taskIds = (await tx.task.findMany({where:{actionPlanId:id,companyId},select:{id:true}})).map(t=>t.id);
+    const evidence = await tx.evidenceOutput.count({where:{companyId,taskId:{in:taskIds}}});
+    const artifacts = await tx.workspaceArtifact.count({where:{companyId,taskId:{in:taskIds}}});
+    if (evidence || artifacts) throw new Error("Este rascunho já tem registros ou arquivos vinculados. Preserve este ciclo e crie uma nova conversa para reconstruir o plano.");
+  }
   const actions = state.plan.initiatives.flatMap(initiative => initiative.actions.map(action => ({ initiative, action })));
   const data = {
     title: `Plano · ${state.diagnosticTitle}`, objective: state.plan.objective,
