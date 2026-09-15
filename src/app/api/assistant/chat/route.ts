@@ -76,7 +76,7 @@ export async function POST(request: Request) {
         const methods = await prisma.improvementMethod.findMany({ where: { status: "ACTIVE" }, include: { versions: { where: { publishedAt: { not: null } }, orderBy: { version: "desc" }, take: 1 } } });
         const catalog = methods.filter(m => m.versions.length).map(m => ({ code: m.code, name: m.name, description: m.description, steps: m.versions[0].steps }));
         const nextStage = current ? WORKSHOP_STAGES[Math.min(5, WORKSHOP_STAGES.indexOf(current.stage) + 1)] : "UNDERSTAND";
-        const allowedStages = WORKSHOP_STAGES.slice(0, WORKSHOP_STAGES.indexOf(nextStage) + 1) as [WorkshopStage, ...WorkshopStage[]];
+        const allowedStages: WorkshopStage[] = [...WORKSHOP_STAGES.slice(0, WORKSHOP_STAGES.indexOf(nextStage) + 1), "REVIEW"];
         async function stageAction(raw: unknown) {
           if (actionDraft) return "Já existe uma proposta nesta resposta. Aguarde a aprovação antes de propor outra ação.";
           try {
@@ -87,7 +87,7 @@ export async function POST(request: Request) {
         }
         const propose = tool({ name: "propor_acao", description: "Prepara uma única alteração para aprovação humana. Nunca executa. actionJson deve seguir o catálogo de ações nas instruções.", parameters: z.object({ actionJson: z.string() }), execute: async ({actionJson}) => { try { return await stageAction(JSON.parse(actionJson)); } catch { return "JSON inválido; corrija os campos."; } } });
         const consult = tool({ name: "consultar_sistema", description: "Consulta registros reais por empresa, ID, projeto e nome; use paginação. Use para identificar o destino antes de propor qualquer alteração. Somente leitura.", parameters: systemQuerySchema, execute: async q => JSON.stringify(await readSystem(prisma,auth.companyId,q)) });
-        const register = tool({ name: "registrar_etapa_plano", description: `Propõe revisão completa, depende de aprovação pelo cartão. Etapa atual: ${current?.stage}. Próxima etapa permitida: ${nextStage}.`, parameters: executableWorkshopPatchSchema.extend({ stage: z.enum(allowedStages) }), execute: patch => stageAction({type:"workshop.patch",patch}) });
+        const register = tool({ name: "registrar_etapa_plano", description: `Propõe uma revisão para aprovação. Etapa atual: ${current?.stage}. Próxima etapa: ${nextStage}. REVIEW pode ser proposta diretamente quando houver plano completo de 3 a 5 iniciativas, decisão confirmada, responsáveis, prazos e 5W2H executável; sua aprovação publica o plano e libera as tarefas.`, parameters: executableWorkshopPatchSchema.extend({ stage: z.enum(WORKSHOP_STAGES).refine(stage=>allowedStages.includes(stage)) }), execute: patch => stageAction({type:"workshop.patch",patch}) });
         const skill = current ? await readFile(path.join(process.cwd(), "docs/ai/skills/coo-plano-colaborativo/SKILL.md"), "utf8") : "";
         const createCanvas = tool({ name: "criar_ferramenta_canvas", description: "Cria ou reutiliza no Canvas uma planilha ou documento editável pedido ou aceito pelo gestor. Para uma ferramenta repetida, use REUSE. Se o usuário pedir funções novas e já existir uma versão, primeiro pergunte se deseja manter a antiga ou substituí-la; só depois use KEEP_BOTH ou REPLACE conforme a resposta. Não altera tarefas ou aprovações. " + CANVAS_INSTRUCTIONS, parameters: canvasSchema.extend({ taskId: z.string().nullable(), duplicateHandling: z.enum(["REUSE", "KEEP_BOTH", "REPLACE"]) }), execute: async raw => {
           const content = validateCanvas(raw);

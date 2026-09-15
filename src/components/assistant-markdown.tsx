@@ -6,6 +6,15 @@ const allowedElements = [
   "blockquote", "code", "pre", "a", "hr", "br", "table", "thead", "tbody", "tr", "th", "td",
 ];
 
+export function normalizeAssistantMarkdown(text: string) {
+  let inFence = false;
+  return text.split("\n").map(line => {
+    if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; return line; }
+    if (inFence) return line;
+    return line.replace(/([.!?:])\s*(#{1,6}\s+[^#\n])/g, "$1\n\n$2");
+  }).join("\n");
+}
+
 export function AssistantMarkdown({ text }: { text: string }) {
   return (
     <div className="min-w-0 break-words [overflow-wrap:anywhere]">
@@ -36,7 +45,7 @@ export function AssistantMarkdown({ text }: { text: string }) {
           td: ({ children }) => <td className="border-b px-3 py-2 align-top leading-6 last:border-b-0">{children}</td>,
         }}
       >
-        {text}
+        {normalizeAssistantMarkdown(text)}
       </ReactMarkdown>
     </div>
   );

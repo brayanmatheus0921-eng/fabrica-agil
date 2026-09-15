@@ -19,3 +19,10 @@ test("não interpreta HTML enviado pelo modelo", () => {
   assert.doesNotMatch(html, /<script>/);
   assert.match(html, /<strong[^>]*>Seguro<\/strong>/);
 });
+
+test("corrige título Markdown colado ao parágrafo sem alterar código", () => {
+  const html = renderToStaticMarkup(createElement(AssistantMarkdown, { text: "Vamos investigar.## Evidência\n\n```txt\nvalor.## literal\n```" }));
+  assert.match(html, /<h2[^>]*>Evidência<\/h2>/);
+  assert.doesNotMatch(html, /\.## Evidência/);
+  assert.match(html, /valor\.## literal/);
+});

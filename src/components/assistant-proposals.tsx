@@ -1,21 +1,15 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Check, Pencil, ShieldCheck, X } from "lucide-react";
 import type { CooProposalView } from "@/core/coo-actions";
-export function AssistantProposals({threadId,refreshKey,busy,onAdjust,onApplied}:{threadId:string;refreshKey:number;busy:boolean;onAdjust:(text:string)=>void;onApplied:()=>void}) {
-  const [rows,setRows]=useState<CooProposalView[]>([]),[working,setWorking]=useState<string|null>(null),[error,setError]=useState("");
-  useEffect(()=>{
-    if(threadId==="new") return;
-    const controller=new AbortController();
-    fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(threadId)}`,{signal:controller.signal}).then(async r=>{if(!r.ok)throw Error("Não foi possível carregar as propostas.");return r.json();}).then(data=>setRows(data.proposals)).catch(e=>{if(!controller.signal.aborted)setError(e.message);});
-    return()=>controller.abort();
-  },[threadId,refreshKey]);
+export function AssistantProposals({rows,busy,onAdjust,onApplied,onChanged}:{rows:CooProposalView[];busy:boolean;onAdjust:(text:string)=>void;onApplied:()=>void;onChanged:(proposal:CooProposalView)=>void}) {
+  const [working,setWorking]=useState<string|null>(null),[error,setError]=useState("");
   async function decide(id:string,decision:"approve"|"reject") {
     if(working||busy)return;setWorking(id);setError("");
     try {
       const r=await fetch("/api/assistant/proposals",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id,decision})});
       const data=await r.json(); if(!r.ok)throw Error(data.error);
-      setRows(old=>old.map(p=>p.id===id?data.proposal:p));
+      onChanged(data.proposal);
       if(data.proposal.status==="APPLIED")onApplied();
     }catch(e){setError(e instanceof Error?e.message:"Não foi possível confirmar. Confira o resultado antes de tentar novamente.");}finally{setWorking(null);}
   }

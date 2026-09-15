@@ -17,7 +17,7 @@ export const cooPlanSchema = z.object({
     title: z.string().min(1), kind: z.enum(["PRIMARY", "SECONDARY"]),
     facts: z.string().min(1), hypothesis: z.string().min(1), evidenceCodes: z.array(z.string()).min(1),
     methodCode: z.string().nullable(), actions: z.array(cooActionSchema).min(1).max(3),
-  })).min(1).max(3),
+  })).min(1).max(5),
 });
 export const workshopPatchSchema = z.object({
   stage: z.enum(WORKSHOP_STAGES), summary: z.string().min(1).max(6000),
@@ -26,7 +26,7 @@ export const workshopPatchSchema = z.object({
   decision: z.object({ primaryTitle: z.string().min(1), reason: z.string().min(1), basis: z.enum(["MATRIX", "NEW_EVIDENCE", "PREFERENCE"]), confirmedByMessageId: z.string() }).nullable(),
   plan: cooPlanSchema.nullable(),
 });
-export const executableCooPlanSchema=cooPlanSchema.extend({initiatives:z.array(cooPlanSchema.shape.initiatives.element.extend({actions:z.array(cooActionSchema.extend({execution:executionGuideSchema})).min(1).max(3)})).min(1).max(3)});
+export const executableCooPlanSchema=cooPlanSchema.extend({initiatives:z.array(cooPlanSchema.shape.initiatives.element.extend({actions:z.array(cooActionSchema.extend({execution:executionGuideSchema})).min(1).max(3)})).min(1).max(5)});
 export const executableWorkshopPatchSchema=workshopPatchSchema.extend({plan:executableCooPlanSchema.nullable()});
 export type WorkshopPatch = z.infer<typeof workshopPatchSchema>;
 export type CooPlan = z.infer<typeof cooPlanSchema>;
@@ -50,7 +50,7 @@ export function applyWorkshopPatch(current: WorkshopState, raw: unknown, userIds
   const patch = workshopPatchSchema.parse(raw);
   const nextIndex = WORKSHOP_STAGES.indexOf(patch.stage);
   if (patch.stage === "FOLLOW_UP" || current.stage === "FOLLOW_UP") throw new Error("O acompanhamento é liberado pela aprovação, não pelo COO.");
-  if (nextIndex > WORKSHOP_STAGES.indexOf(current.stage) + 1) throw new Error("Confirme a etapa atual antes de avançar.");
+  if (nextIndex > WORKSHOP_STAGES.indexOf(current.stage) + 1 && patch.stage !== "REVIEW") throw new Error("Confirme a etapa atual antes de avançar.");
   if (patch.confirmedFacts.some((fact) => !userIds.includes(fact.sourceMessageId))) throw new Error("Fato sem mensagem do gestor.");
   if (patch.decision && !userIds.includes(patch.decision.confirmedByMessageId)) throw new Error("Prioridade sem confirmação do gestor.");
   if (patch.plan) {
@@ -60,7 +60,7 @@ export function applyWorkshopPatch(current: WorkshopState, raw: unknown, userIds
       if (item.evidenceCodes.some((code) => !evidenceCodes.includes(code) && !userIds.includes(code))) throw new Error("Evidência fora deste diagnóstico ou conversa.");
     }
   }
-  if (patch.stage === "REVIEW" && (!patch.plan || !patch.decision || patch.plan.initiatives.find((item) => item.kind === "PRIMARY")?.title !== patch.decision.primaryTitle)) throw new Error("Confirme a iniciativa principal e complete o plano antes da revisão.");
+  if (patch.stage === "REVIEW" && (!patch.plan || patch.plan.initiatives.length < 3 || !patch.decision || patch.plan.initiatives.find((item) => item.kind === "PRIMARY")?.title !== patch.decision.primaryTitle)) throw new Error("Confirme a iniciativa principal e complete 3 a 5 iniciativas antes da aprovação.");
   return { ...current, ...patch, revision: current.revision + 1, furthestStage: Math.max(current.furthestStage, nextIndex), history: [...current.history, { revision: current.revision, stage: current.stage, summary: current.summary, at: new Date().toISOString() }] };
 }
 export function revisitWorkshop(current: WorkshopState, stage: WorkshopStage): WorkshopState {

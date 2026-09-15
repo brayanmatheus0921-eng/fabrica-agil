@@ -1,7 +1,7 @@
 "use client";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUpRight, Files, History, ListChecks, LoaderCircle, MoreHorizontal, PanelLeftOpen, Pencil, Plus, RefreshCw, Sparkles, Target, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUpRight, Files, History, ListChecks, MoreHorizontal, PanelLeftOpen, Pencil, Plus, RefreshCw, Target, Trash2, X } from "lucide-react";
 import { ReadingDetails } from "@/components/reading-layout";
 import { AssistantProposals } from "@/components/assistant-proposals";
 import { approvalIntent, type CooProposalView } from "@/core/coo-actions";
@@ -23,18 +23,9 @@ function readDesktopHistory() {
 }
 
 function ThinkingStatus({ activity }: { activity: string }) {
-  const supportingText = activity.startsWith("Respondendo")
-    ? "Transformando a análise em uma orientação curta e prática."
-    : activity.includes("diagnóstico") || activity.includes("contexto")
-      ? "Reunindo apenas os dados que ajudam nesta conversa."
-      : activity.includes("Organizando")
-        ? "Separando o que foi confirmado do que ainda precisa ser validado."
-        : "Preparando o próximo passo sem complicar sua rotina.";
-
-  return <div className="max-w-xl py-1" role="status" aria-live="polite">
-    <p className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-primary"><Sparkles className="size-3.5" />COO analisando</p>
-    <div className="mt-2 flex items-center gap-2"><LoaderCircle className="size-4 shrink-0 animate-spin text-primary motion-reduce:animate-none" /><p className="text-sm font-semibold">{activity}</p></div>
-    <p className="mt-1 pl-6 text-xs leading-5 text-muted">{supportingText}</p>
+  return <div className="flex max-w-xl items-center gap-2 py-1 text-xs text-muted" role="status" aria-live="polite">
+    <span aria-hidden="true" className="inline-flex items-center gap-1">{[0,1,2].map(i=><span key={i} className="size-1.5 animate-bounce rounded-full bg-primary motion-reduce:animate-none" style={{animationDelay:`${i*180}ms`}} />)}</span>
+    <span>COO analisando · {activity}</span>
   </div>;
 }
 
@@ -52,6 +43,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
   const desktopHistory = useSyncExternalStore(subscribeDesktopHistory, readDesktopHistory, () => false);
   const panel = panelOverride ?? desktopHistory;
   const [proposalRefresh, setProposalRefresh] = useState(0);
+  const [proposals,setProposals] = useState<CooProposalView[]>([]);
   const [canvasRefresh, setCanvasRefresh] = useState(0), [canvasPanel, setCanvasPanel] = useState(false);
   const [openArtifactId, setOpenArtifactId] = useState<string>();
   const canvasDirty = useRef(false);
@@ -61,8 +53,10 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
   const [switchingChat, setSwitchingChat] = useState(false);
   const busyRef = useRef(Boolean(initialGenerationId)), requestId = useRef(initialGenerationId), abortRef = useRef<AbortController | null>(null);
   const pendingMessage = useRef("");
-  const scroll = useRef<HTMLDivElement>(null), follow = useRef(true);
+  const scroll = useRef<HTMLDivElement>(null), follow = useRef(true), readingAnchor = useRef<string|null>(null);
   useEffect(() => { const node = scroll.current; if (node && follow.current) node.scrollTop = node.scrollHeight; }, [messages, activity]);
+  useLayoutEffect(() => { const node=scroll.current,id=readingAnchor.current; if(!node||!id)return; const target=[...node.querySelectorAll<HTMLElement>("[data-message-id]")].find(element=>element.dataset.messageId===id); if(!target)return; node.scrollTop += target.getBoundingClientRect().top-node.getBoundingClientRect().top-24; readingAnchor.current=null; },[messages]);
+  useEffect(()=>{if(activeThreadId==="new")return;const controller=new AbortController();fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadId)}`,{signal:controller.signal}).then(async r=>{if(!r.ok)throw Error("Não foi possível carregar as propostas.");return r.json();}).then(data=>setProposals(data.proposals)).catch(()=>{});return()=>controller.abort();},[activeThreadId,proposalRefresh]);
   useEffect(() => () => abortRef.current?.abort(), []);
   useEffect(() => {
     if (!initialGenerationId) return;
@@ -82,7 +76,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
     const text = draft.trim();
     // Synchronous guard: catches double Enter/click before React has rendered.
     if (busyRef.current || disabled || !text) return;
-    busyRef.current = true; setBusy(true); setNotice(""); setActivity("Entendendo seu pedido…"); setDraft(""); follow.current = true;
+    busyRef.current = true; setBusy(true); setNotice(""); setActivity("Entendendo seu pedido…"); setDraft(""); follow.current = false;
     const decision = approvalIntent(text);
     if (decision && activeThreadIdRef.current !== "new") {
       try {
@@ -96,7 +90,8 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
           if(!response.ok) throw Error(result.error);
           const p = result.proposal as CooProposalView;
           const answer = p.result?.message ?? (p.status==="REJECTED"?"Proposta recusada. Nenhuma alteração foi feita.":"Esta proposta perdeu a validade. Peça uma nova revisão antes de confirmar.");
-          setMessages(old=>[...old,{id:crypto.randomUUID(),role:"USER",content:text},{id:crypto.randomUUID(),role:"ASSISTANT",content:answer}]);
+          const approvalMessageId=crypto.randomUUID();readingAnchor.current=approvalMessageId;
+          setMessages(old=>[...old,{id:approvalMessageId,role:"USER",content:text},{id:crypto.randomUUID(),role:"ASSISTANT",content:answer}]);
           const fresh = await fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadIdRef.current)}`).then(r=>r.json());
           setState(fresh.workshop); setProposalRefresh(v=>v+1);setCanvasRefresh(v=>v+1);router.refresh();
           busyRef.current=false;setBusy(false);setActivity("");return;
@@ -109,6 +104,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
     pendingMessage.current = text;
     const controller = new AbortController(); abortRef.current = controller;
     const assistantId = `assistant-${id}`;
+    readingAnchor.current=`user-${id}`;
     setMessages(old => [...old, { id: `user-${id}`, role: "USER", content: text }]);
     let received = "", frame: ReturnType<typeof setTimeout> | null = null, finished = false, ack = false;
     const flush = () => { if (frame) clearTimeout(frame); frame = null; if (received) setMessages(old => old.some(m => m.id === assistantId) ? old.map(m => m.id === assistantId ? { ...m, content: received } : m) : [...old, { id: assistantId, role: "ASSISTANT", content: received }]); };
@@ -124,7 +120,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
         while ((end = buffer.indexOf("\n")) >= 0) {
           const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); if (!line) continue;
           const event = JSON.parse(line);
-          if (event.type === "ack") { ack = true; setActivity("Mensagem salva. Consultando o contexto…"); if (event.threadId && event.threadId !== activeThreadIdRef.current) { activeThreadIdRef.current = event.threadId; setActiveThreadId(event.threadId); const url = new URL(window.location.href); url.searchParams.set("chat", event.threadId); url.searchParams.delete("pergunta"); window.history.replaceState(null, "", url); } }
+          if (event.type === "ack") { ack = true; setActivity("Mensagem salva. Consultando o contexto…"); if(event.userId)setMessages(old=>old.map(m=>m.id===`user-${id}`?{...m,id:event.userId}:m)); if (event.threadId && event.threadId !== activeThreadIdRef.current) { activeThreadIdRef.current = event.threadId; setActiveThreadId(event.threadId); const url = new URL(window.location.href); url.searchParams.set("chat", event.threadId); url.searchParams.delete("pergunta"); window.history.replaceState(null, "", url); } }
           if (event.type === "activity") setActivity(event.text);
           if (event.type === "delta") { received += event.text; setActivity("Respondendo…"); if (!frame) frame = setTimeout(flush, 40); }
           if (event.type === "done") { setProposalRefresh(v=>v+1); finished = true; setState(event.state); if (event.artifact) { setCanvasRefresh(v => v + 1); setOpenArtifactId(event.artifact.id); setCanvasPanel(true); setPanel(false); setNotice(event.artifact.operation === "REUSE" ? `Ferramenta reutilizada: ${event.artifact.title}` : event.artifact.operation === "REPLACE" ? `Ferramenta atualizada: ${event.artifact.title}` : `Ferramenta criada: ${event.artifact.title}`); } }
@@ -158,6 +154,11 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
     window.setTimeout(() => router.push(`/assistente?chat=${id}`), 130);
   }
 
+  const attachedSources=new Set(messages.filter((m,index)=>m.role==="USER"&&messages[index+1]?.role==="ASSISTANT").map(m=>m.id));
+  const onProposalApplied=()=>{setNotice("Ação aplicada com sua aprovação.");setCanvasRefresh(v=>v+1);router.refresh();fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadId)}`).then(r=>r.json()).then(data=>{if(data.workshop!==undefined)setState(data.workshop);}).catch(()=>{});};
+  const onProposalChanged=(proposal:CooProposalView)=>setProposals(old=>old.map(p=>p.id===proposal.id?proposal:p));
+  const onProposalAdjust=(text:string)=>{setDraft(text);document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Mensagem para o consultor"]')?.focus();};
+
   return <div className="coo-chat relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-white">
     <section className={`assistant-chat-pane flex min-w-0 flex-1 flex-col transition-[opacity,transform] duration-200 ease-out ${switchingChat ? "translate-y-1 opacity-0" : "translate-y-0 opacity-100"}`}>
       <header className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-3 sm:px-6">
@@ -168,9 +169,9 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
       {state?.stage === "REVIEW" && state.planId ? <a href={`/plano-de-acao?id=${state.planId}`} className="shrink-0 border-b bg-accent px-4 py-3 text-sm font-semibold">Plano pronto para sua revisão → Revisar e aprovar</a> : null}
       <div ref={scroll} data-empty={!messages.length} onScroll={() => { const node = scroll.current; if (node) { follow.current = node.scrollHeight - node.scrollTop - node.clientHeight < 90; setAway(!follow.current); } }} className="coo-conversation min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-8">
         <div className="mx-auto flex max-w-3xl flex-col gap-6">
-          {!messages.length ? <div className="coo-welcome py-8 text-center sm:py-12"><p className="coo-welcome-title">O que vamos fazer hoje?</p><p className="mt-2 text-sm text-muted">Converse com seu COO. Da decisão à execução, com sua aprovação.</p><div className="mx-auto mt-6 grid max-w-md gap-2 text-left">{suggestions.slice(0, 3).map((suggestion) => { const Icon = suggestion.kind === "task" ? ListChecks : suggestion.kind === "review" ? RefreshCw : Target; return <button key={`${suggestion.kind}-${suggestion.label}`} type="button" onClick={() => setDraft(suggestion.label)} className="group flex min-h-11 items-center gap-3 rounded-xl border bg-surface px-3.5 py-2.5 text-[13px] leading-5 transition hover:border-primary/35 hover:bg-surface-muted"><Icon className="size-4 shrink-0 text-primary" /><span className="min-w-0 flex-1 truncate">{suggestion.label}</span><ArrowUpRight className="size-3.5 shrink-0 text-muted transition group-hover:text-primary" /></button>; })}</div></div> : messages.map((m, index) => <div key={m.id} className="contents">{busy && activity && m.role === "ASSISTANT" && index === messages.length - 1 ? <ThinkingStatus activity={activity} /> : null}<article aria-label={m.role === "USER" ? "Sua mensagem" : "Resposta do consultor"} className={m.role === "USER" ? "ml-auto max-w-[90%] rounded-2xl bg-surface-muted px-4 py-3 text-sm leading-6" : "max-w-full text-sm leading-7"}><AssistantMarkdown text={m.content} /></article></div>)}
-          <AssistantProposals threadId={activeThreadId} refreshKey={proposalRefresh} busy={busy} onAdjust={text=>{setDraft(text); document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Mensagem para o consultor"]')?.focus();}} onApplied={()=>{setNotice("Ação aplicada com sua aprovação.");setCanvasRefresh(v=>v+1);router.refresh();fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadId)}`).then(r=>r.json()).then(data=>{if(data.workshop!==undefined)setState(data.workshop);}).catch(()=>{});}} />
-          {busy && activity && messages.at(-1)?.role !== "ASSISTANT" ? <ThinkingStatus activity={activity} /> : null}
+          {!messages.length ? <div className="coo-welcome py-8 text-center sm:py-12"><p className="coo-welcome-title">O que vamos fazer hoje?</p><p className="mt-2 text-sm text-muted">Converse com seu COO. Da decisão à execução, com sua aprovação.</p><div className="mx-auto mt-6 grid max-w-md gap-2 text-left">{suggestions.slice(0, 3).map((suggestion) => { const Icon = suggestion.kind === "task" ? ListChecks : suggestion.kind === "review" ? RefreshCw : Target; return <button key={`${suggestion.kind}-${suggestion.label}`} type="button" onClick={() => setDraft(suggestion.label)} className="group flex min-h-11 items-center gap-3 rounded-xl border bg-surface px-3.5 py-2.5 text-[13px] leading-5 transition hover:border-primary/35 hover:bg-surface-muted"><Icon className="size-4 shrink-0 text-primary" /><span className="min-w-0 flex-1 truncate">{suggestion.label}</span><ArrowUpRight className="size-3.5 shrink-0 text-muted transition group-hover:text-primary" /></button>; })}</div></div> : messages.map((m, index) => <div key={m.id} className="contents"><article data-message-id={m.id} aria-label={m.role === "USER" ? "Sua mensagem" : "Resposta do consultor"} className={m.role === "USER" ? "ml-auto max-w-[90%] rounded-2xl bg-surface-muted px-4 py-3 text-sm leading-6" : "max-w-full text-sm leading-7"}><AssistantMarkdown text={m.content} /></article>{m.role==="ASSISTANT"&&messages[index-1]?.role==="USER"?<AssistantProposals rows={proposals.filter(p=>p.sourceMessageId===messages[index-1].id)} busy={busy} onAdjust={onProposalAdjust} onApplied={onProposalApplied} onChanged={onProposalChanged}/>:null}</div>)}
+          {proposals.some(p=>p.status==="PENDING"&&!attachedSources.has(p.sourceMessageId))?<AssistantProposals rows={proposals.filter(p=>p.status==="PENDING"&&!attachedSources.has(p.sourceMessageId))} busy={busy} onAdjust={onProposalAdjust} onApplied={onProposalApplied} onChanged={onProposalChanged}/>:null}
+          {busy && activity ? <ThinkingStatus activity={activity} /> : null}
         </div>
       </div>
       {away ? <button onClick={() => { follow.current = true; scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: "smooth" }); }} className="mx-auto -mt-10 mb-2 z-10 rounded-full border bg-white p-2 shadow" aria-label="Ir para última mensagem"><ArrowDown className="size-4" /></button> : null}
