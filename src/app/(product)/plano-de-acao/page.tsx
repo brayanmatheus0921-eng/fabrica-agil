@@ -43,7 +43,7 @@ export default async function ActionPlanPage({
 }) {
   const company = await getDevCompany();
   const params = await searchParams;
-  const [plan, recommendation] = await Promise.all([
+  const [plan, recommendation, completedDiagnosis, recentThreads] = await Promise.all([
     prisma.actionPlan.findFirst({
       where: {
         companyId: company.id,
@@ -71,7 +71,10 @@ export default async function ActionPlanPage({
         },
       },
     }),
+    prisma.diagnosticSession.count({where:{companyId:company.id,status:"COMPLETED"}}),
+    prisma.conversationThread.findMany({where:{companyId:company.id,status:"ACTIVE"},select:{id:true,workflowState:true},orderBy:{updatedAt:"desc"},take:20}),
   ]);
+  const planningThread=recentThreads.find(thread=>{const state=readWorkshop(thread.workflowState);return state&&state.stage!=="FOLLOW_UP"&&!state.planId;});
 
   const completed = plan?.tasks.filter((task) => task.status === "DONE").length ?? 0;
   const total = plan?.tasks.length ?? 0;
@@ -107,11 +110,12 @@ export default async function ActionPlanPage({
         description={
           plan?.status === "DRAFT" ? "Revise as prioridades e as tarefas abaixo. A execução só começa após sua aprovação." : plan
             ? "Faça uma tarefa por vez. A Fábrica Ágil mostra o que entregar e acompanha o avanço."
+            : planningThread ? "Seu plano está sendo construído com o COO. Projetos e tarefas aparecerão depois da aprovação final."
             : "Seu plano será criado a partir do método recomendado, sem você precisar montar tarefas do zero."
         }
         actions={
           <StatusPill tone={plan && plan.status !== "DRAFT" ? "success" : "warning"}>
-            {plan?.status === "DRAFT" ? "Pendente de aprovação" : plan?.status === "PAUSED" ? "Plano pausado" : plan ? `${progress}% concluído` : "Plano pendente"}
+            {plan?.status === "DRAFT" ? "Pendente de aprovação" : plan?.status === "PAUSED" ? "Plano pausado" : plan ? `${progress}% concluído` : planningThread ? "Em construção" : "Plano pendente"}
           </StatusPill>
         }
       />
@@ -306,11 +310,15 @@ export default async function ActionPlanPage({
             <h2 className="mt-5 text-xl font-bold">
               {recommendation
                 ? "A recomendação está pronta"
+                : planningThread ? "Seu plano está em construção com o COO"
+                : completedDiagnosis ? "Diagnóstico concluído. Hora de montar o plano"
                 : "Primeiro conclua o diagnóstico"}
             </h2>
             <p className="mt-2 text-sm leading-6 text-muted">
               {recommendation
                 ? "Crie o plano recomendado e receba as tarefas na ordem certa."
+                : planningThread ? "Continue a conversa para definir 3 a 5 iniciativas viáveis, responsáveis, prazos, recursos e custos. O plano e as tarefas serão liberados após sua aprovação do conjunto completo."
+                : completedDiagnosis ? "Converse com o COO para transformar o diagnóstico em iniciativas, 5W2H e tarefas executáveis."
                 : "A Fábrica Ágil precisa entender o gargalo antes de sugerir ações."}
             </p>
             {recommendation ? (
@@ -328,6 +336,10 @@ export default async function ActionPlanPage({
                   <ArrowRight aria-hidden="true" className="size-4" />
                 </button>
               </form>
+            ) : planningThread || completedDiagnosis ? (
+              <Link href={planningThread ? `/assistente?chat=${planningThread.id}` : "/assistente"} className="mt-6 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-bold text-white">
+                Continuar plano com o COO<ArrowRight aria-hidden="true" className="size-4" />
+              </Link>
             ) : (
               <Link
                 href="/diagnostico"
