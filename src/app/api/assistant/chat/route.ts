@@ -11,7 +11,7 @@ import { INDUSTRIAL_CONSULTANT_INSTRUCTIONS } from "@/server/ai/prompt";
 import { generations, sameOrigin } from "@/server/ai/chat-generation";
 import { prepareAction, proposeAction, proposalView } from "@/server/coo/action-service";
 import { readSystem, systemQuerySchema } from "@/server/coo/read-system";
-import type { CooAction } from "@/core/coo-actions";
+import { interviewResumeEligible, type CooAction } from "@/core/coo-actions";
 import { COO_ACTION_INSTRUCTIONS } from "@/server/coo/instructions";
 import { canvasSchema, validateCanvas } from "@/core/workspace-artifacts";
 import { CANVAS_INSTRUCTIONS } from "@/server/ai/artifact-agent";
@@ -20,7 +20,7 @@ import { findReusableCanvas } from "@/server/artifact-deduplication";
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
-const inputSchema = z.object({ threadId: z.string().min(1).max(200), requestId: z.string().uuid(), message: z.string().trim().min(1).max(6000) });
+const inputSchema = z.object({ threadId: z.string().min(1).max(200), requestId: z.string().uuid(), message: z.string().trim().min(1).max(6000).optional(), resumeProposalId: z.string().min(1).max(200).optional() }).strict().refine(value => Boolean(value.message) !== Boolean(value.resumeProposalId));
 
 export async function POST(request: Request) {
   const auth = await requireAuth();
@@ -28,15 +28,16 @@ export async function POST(request: Request) {
   const parsed = inputSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Escreva uma mensagem de até 6.000 caracteres." }, { status: 400 });
   if (!env.OPENAI_API_KEY) return Response.json({ error: "Integração do COO não configurada." }, { status: 503 });
-  const { threadId: requestedThreadId, requestId, message } = parsed.data;
+  const { threadId: requestedThreadId, requestId, message, resumeProposalId } = parsed.data;
   const controller = new AbortController();
   const disconnect = () => controller.abort();
   request.signal.addEventListener("abort", disconnect, { once: true });
   if (request.signal.aborted) controller.abort();
-  const userId = `user-${requestId}`, assistantId = `assistant-${requestId}`;
+  const userId = message ? `user-${requestId}` : null, assistantId = resumeProposalId ? `assistant-resume-${resumeProposalId}` : `assistant-${requestId}`;
   const lockedThreadId = await prisma.$transaction(async tx => {
     let targetThreadId = requestedThreadId;
     if (requestedThreadId === "new") {
+      if (!message) return null;
       const cleanTitle = message.replace(/\s+/g, " ").trim();
       const created = await tx.conversationThread.create({ data: {
         companyId: auth.companyId,
@@ -46,16 +47,25 @@ export async function POST(request: Request) {
       }, select: { id: true } });
       targetThreadId = created.id;
     } else {
+      if (resumeProposalId) {
+        const proposal = await tx.cooActionProposal.findFirst({ where: { id: resumeProposalId, threadId: requestedThreadId, companyId: auth.companyId, proposedByUserId: auth.userId, status: "APPLIED" } });
+        if (!proposal) return null;
+        const alreadyContinued=Boolean(await tx.conversationMessage.findUnique({ where: { id: assistantId } }));
+        const latestUser = await tx.conversationMessage.findFirst({ where: { threadId: requestedThreadId, role: "USER" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { metadata: true } });
+        if (!interviewResumeEligible(proposal.action,resumeProposalId,latestUser?.metadata,alreadyContinued)) return null;
+      }
       const lock = await tx.conversationThread.updateMany({ where: { id: requestedThreadId, companyId: auth.companyId,
         OR: [{ generationId: null }, { generationStartedAt: { lt: new Date(Date.now() - 180_000) } }] },
         data: { generationId: requestId, generationStartedAt: new Date() } });
       if (!lock.count) return null;
     }
-    if (await tx.conversationMessage.findUnique({ where: { id: userId } })) throw new Error("Mensagem já recebida.");
-    await tx.conversationMessage.create({ data: { id: userId, threadId: targetThreadId, authorUserId: auth.userId, role: "USER", content: message } });
+    if (userId && message) {
+      if (await tx.conversationMessage.findUnique({ where: { id: userId } })) throw new Error("Mensagem já recebida.");
+      await tx.conversationMessage.create({ data: { id: userId, threadId: targetThreadId, authorUserId: auth.userId, role: "USER", content: message } });
+    }
     return targetThreadId;
   }).catch(() => null);
-  if (!lockedThreadId) return Response.json({ error: "Aguarde a resposta atual terminar. Sua mensagem não foi reenviada." }, { status: 409 });
+  if (!lockedThreadId) return Response.json({ error: resumeProposalId ? "Esta etapa já foi retomada ou a conversa avançou. Reabra a conversa para conferir." : "Aguarde a resposta atual terminar. Sua mensagem não foi reenviada." }, { status: 409 });
   const threadId = lockedThreadId;
   generations.set(requestId, controller);
   const timer = setTimeout(() => controller.abort(new Error("Tempo de resposta excedido")), 150_000);
@@ -96,8 +106,8 @@ export async function POST(request: Request) {
           if (existing && raw.duplicateHandling === "REUSE") return `A ferramenta já existe: ${existing.title}. Está em Ferramentas e arquivos. Nenhuma alteração feita.`;
           return stageAction({ type:"artifact.save", content, taskId:raw.taskId, replaceArtifactId:existing && raw.duplicateHandling === "REPLACE" ? existing.id : null });
         }});
-        const agent = new Agent({ name: "COO Fábrica Ágil", model: env.OPENAI_MODEL ?? "gpt-5.6-luna", tools: current && current.stage !== "FOLLOW_UP" ? [consult, propose, register, createCanvas] : [consult, propose, createCanvas],
-          instructions: `${INDUSTRIAL_CONSULTANT_INSTRUCTIONS}\n${skill}\n${COO_ACTION_INSTRUCTIONS}`,
+        const agent = new Agent({ name: "COO Fábrica Ágil", model: env.OPENAI_MODEL ?? "gpt-5.6-luna", tools: resumeProposalId ? [consult] : current && current.stage !== "FOLLOW_UP" ? [consult, propose, register, createCanvas] : [consult, propose, createCanvas],
+          instructions: `${INDUSTRIAL_CONSULTANT_INSTRUCTIONS}\n${skill}\n${COO_ACTION_INSTRUCTIONS}${resumeProposalId ? "\nEsta resposta retoma a conversa imediatamente após a aprovação de uma etapa preparatória. Não há nova resposta do gestor. Explique em uma frase o que foi salvo e faça uma pergunta concreta sobre o próximo dado indispensável para construir um plano completo com 3 a 5 iniciativas e 5W2H. Não valide hipóteses por aprovação de etapa. Não proponha nem execute ações neste turno. Uma medição ausente pode entrar como primeira iniciativa; não deixe a entrevista parada esperando uma semana de dados." : ""}`,
         });
         // Selected diagnosis is authoritative; historical model prose is not matrix evidence.
         const snapshot = diagnosis?.resultSnapshot && typeof diagnosis.resultSnapshot === "object" ? { ...diagnosis.resultSnapshot as object } as Record<string, unknown> : null;
@@ -108,7 +118,7 @@ export async function POST(request: Request) {
         const automaticProgress = progressPlan ? taskProgress(progressPlan.tasks, artifacts) : null;
         const scopedContext = current ? { company: context.company, selectedPlan, memories: context.memories, note: "Use exclusivamente o diagnóstico selecionado abaixo. Memórias são contexto histórico, não substituem a matriz." } : context;
         const projects = await readSystem(prisma, auth.companyId, {area:"projects",query:"",projectId:null,recordId:null,offset:0});
-        const input = JSON.stringify({ today: new Date().toLocaleDateString("sv-SE", {timeZone:"America/Sao_Paulo"}), projects, context: scopedContext, automaticProgress, artifacts: artifacts.map(a=>({...a, interpretation:a.confirmedAt?a.interpretation:null, notice:a.confirmedAt?"Leitura confirmada pelo usuário; não prova independente.":"Rascunho ou leitura pendente; não usar como resultado."})), workshop: current, diagnosis: diagnosis ? { id: diagnosis.id, title: diagnosis.title, matrix: snapshot, answers: diagnosis.answers.map(a => ({ code: a.question.code, question: a.question.prompt, value: a.value, notes: a.notes })) } : null, methods: catalog, messages: [...thread.messages].reverse().map(m => ({ id: m.id, role: m.role, content: m.content })) });
+        const input = JSON.stringify({ today: new Date().toLocaleDateString("sv-SE", {timeZone:"America/Sao_Paulo"}), projects, context: scopedContext, automaticProgress, artifacts: artifacts.map(a=>({...a, interpretation:a.confirmedAt?a.interpretation:null, notice:a.confirmedAt?"Leitura confirmada pelo usuário; não prova independente.":"Rascunho ou leitura pendente; não usar como resultado."})), workshop: current, diagnosis: diagnosis ? { id: diagnosis.id, title: diagnosis.title, matrix: snapshot, answers: diagnosis.answers.map(a => ({ code: a.question.code, question: a.question.prompt, value: a.value, notes: a.notes })) } : null, methods: catalog, messages: [...thread.messages].reverse().map(m => ({ id: m.id, role: m.role, content: m.content })), ...(resumeProposalId ? { continuation: "Aprovação de etapa preparatória; fazer a próxima pergunta sem afirmar que o plano foi aprovado." } : {}) });
         emit({ type: "activity", text: "Preparando uma resposta e o próximo passo…" });
         const result = await run(agent, input, { stream: true, signal: controller.signal, maxTurns: 5 });
         for await (const chunk of result.toTextStream()) {
@@ -126,8 +136,8 @@ export async function POST(request: Request) {
           await tx.$queryRaw`SELECT id FROM "ConversationThread" WHERE id = ${threadId} FOR UPDATE`;
           const fresh = await tx.conversationThread.findFirst({ where: { id: threadId, companyId: auth.companyId, generationId: requestId } });
           if (!fresh || controller.signal.aborted) throw new Error("Resposta interrompida");
-          const proposal = actionDraft ? await proposeAction(tx, auth, threadId, userId, actionDraft) : null;
-          await tx.conversationMessage.create({ data: { id: assistantId, threadId, role: "ASSISTANT", content: text, metadata: { requestId } } });
+          const proposal = actionDraft && userId ? await proposeAction(tx, auth, threadId, userId, actionDraft) : null;
+          await tx.conversationMessage.create({ data: { id: assistantId, threadId, role: "ASSISTANT", content: text, metadata: { requestId, ...(resumeProposalId ? { continuationForProposalId: resumeProposalId } : {}) } } });
           await tx.conversationThread.update({ where: { id: threadId }, data: { lastMessageAt: new Date(), generationId: null, generationStartedAt: null,  } });
           return { state: current, proposal: proposal ? proposalView(proposal) : null };
         });
@@ -136,7 +146,7 @@ export async function POST(request: Request) {
         const interrupted = controller.signal.aborted;
         console.error("COO chat:", interrupted ? "interrupted" : error instanceof Error ? error.name : "failed");
         // Partial text remains visible and explicitly marked, but tool changes are discarded.
-        await prisma.conversationMessage.upsert({ where: { id: assistantId }, update: {}, create: { id: assistantId, threadId, role: "ASSISTANT", content: text || (interrupted ? "Resposta interrompida. Você pode continuar quando quiser." : "Não consegui responder agora. Sua mensagem está salva; tente novamente."), metadata: { interrupted, failed: !interrupted, requestId } } }).catch(() => undefined);
+        if (!resumeProposalId) await prisma.conversationMessage.upsert({ where: { id: assistantId }, update: {}, create: { id: assistantId, threadId, role: "ASSISTANT", content: text || (interrupted ? "Resposta interrompida. Você pode continuar quando quiser." : "Não consegui responder agora. Sua mensagem está salva; tente novamente."), metadata: { interrupted, failed: !interrupted, requestId } } }).catch(() => undefined);
         emit({ type: interrupted ? "stopped" : "error", text: interrupted ? "Resposta interrompida. As confirmações desta resposta não foram aplicadas." : "Não foi possível concluir. A mensagem ficou salva; tente novamente." });
       } finally {
         clearTimeout(timer); generations.delete(requestId); request.signal.removeEventListener("abort", disconnect);

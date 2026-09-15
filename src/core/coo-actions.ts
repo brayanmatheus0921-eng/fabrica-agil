@@ -38,8 +38,17 @@ export type CooActionResult = { message: string; href: string; artifactId?: stri
 export type CooProposalView = {
   id: string; threadId: string; sourceMessageId: string; summary: string; details: string[];
   status: "PENDING" | "APPLIED" | "REJECTED" | "EXPIRED" | "STALE";
-  createdAt: string; result?: CooActionResult;
+  createdAt: string; result?: CooActionResult; resumeInterview: boolean;
 };
+
+// A saved preparation is not a manager answer or final plan approval.
+export function interviewResumeEligible(action: unknown, proposalId: string, latestUserMetadata: unknown, alreadyContinued: boolean): boolean {
+  if (alreadyContinued || !action || typeof action !== "object" || !latestUserMetadata || typeof latestUserMetadata !== "object") return false;
+  const a = action as { type?: string; patch?: { stage?: string } };
+  const approval = latestUserMetadata as { proposalId?: string; decision?: string };
+  return approval.proposalId === proposalId && approval.decision === "approve" &&
+    (a.type === "workshop.start" || (a.type === "workshop.patch" && Boolean(a.patch?.stage) && a.patch?.stage !== "REVIEW"));
+}
 
 export function validateCooAction(raw: unknown): CooAction {
   const action = actionSchema.parse(raw);

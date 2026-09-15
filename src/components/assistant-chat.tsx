@@ -53,10 +53,21 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
   const [switchingChat, setSwitchingChat] = useState(false);
   const busyRef = useRef(Boolean(initialGenerationId)), requestId = useRef(initialGenerationId), abortRef = useRef<AbortController | null>(null);
   const pendingMessage = useRef("");
+  const resumedOnOpen = useRef(false);
   const scroll = useRef<HTMLDivElement>(null), follow = useRef(true), readingAnchor = useRef<string|null>(null);
   useEffect(() => { const node = scroll.current; if (node && follow.current) node.scrollTop = node.scrollHeight; }, [messages, activity]);
   useLayoutEffect(() => { const node=scroll.current,id=readingAnchor.current; if(!node||!id)return; const target=[...node.querySelectorAll<HTMLElement>("[data-message-id]")].find(element=>element.dataset.messageId===id); if(!target)return; node.scrollTop += target.getBoundingClientRect().top-node.getBoundingClientRect().top-24; readingAnchor.current=null; },[messages]);
   useEffect(()=>{if(activeThreadId==="new")return;const controller=new AbortController();fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadId)}`,{signal:controller.signal}).then(async r=>{if(!r.ok)throw Error("Não foi possível carregar as propostas.");return r.json();}).then(data=>setProposals(data.proposals)).catch(()=>{});return()=>controller.abort();},[activeThreadId,proposalRefresh]);
+  useEffect(() => {
+    if (resumedOnOpen.current || initialGenerationId || currentThreadId === "new" || initialMessages.at(-1)?.role !== "ASSISTANT" || !initialMessages.at(-1)?.content.startsWith("Etapa de preparação salva.")) return;
+    resumedOnOpen.current = true;
+    fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(currentThreadId)}`).then(r=>r.json()).then(data=>{
+      const proposal=(data.proposals as CooProposalView[]).findLast(p=>p.status==="APPLIED"&&p.resumeInterview);
+      if(proposal){readingAnchor.current=initialMessages.at(-2)?.id??null;void resumeInterview(proposal);}
+    }).catch(()=>{});
+  // Only the server-rendered conversation on opening can recover an old approval.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => () => abortRef.current?.abort(), []);
   useEffect(() => {
     if (!initialGenerationId) return;
@@ -70,6 +81,34 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
     abortRef.current?.abort();
     try { await fetch("/api/assistant/stop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ threadId: activeThreadIdRef.current, requestId: requestId.current, message: pendingMessage.current }) }); }
     finally { busyRef.current = false; setBusy(false); setStopping(false); setActivity(""); setNotice("Resposta interrompida. Você pode continuar."); router.refresh(); }
+  }
+
+  async function resumeInterview(proposal:CooProposalView) {
+    if (!proposal.resumeInterview || busyRef.current || disabled) return;
+    busyRef.current=true;setBusy(true);setActivity("Preparando a próxima pergunta do plano…");setNotice("");follow.current=false;
+    if(!readingAnchor.current)readingAnchor.current=proposal.sourceMessageId;
+    const id=crypto.randomUUID(),assistantId=`assistant-resume-${proposal.id}`;
+    requestId.current=id;pendingMessage.current="";
+    const controller=new AbortController();abortRef.current=controller;
+    let received="",finished=false;
+    const flush=()=>{if(received)setMessages(old=>old.some(m=>m.id===assistantId)?old.map(m=>m.id===assistantId?{...m,content:received}:m):[...old,{id:assistantId,role:"ASSISTANT",content:received}]);};
+    try {
+      const response=await fetch("/api/assistant/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({threadId:proposal.threadId,requestId:id,resumeProposalId:proposal.id}),signal:controller.signal});
+      if(!response.ok){const data=await response.json().catch(()=>({}));throw Error(data.error??"Não foi possível continuar o plano.");}
+      if(!response.body)throw Error("Conexão sem resposta.");
+      const reader=response.body.getReader(),decoder=new TextDecoder();let buffer="";
+      while(true){const chunk=await reader.read();if(chunk.done)break;buffer+=decoder.decode(chunk.value,{stream:true});let end:number;
+        while((end=buffer.indexOf("\n"))>=0){const line=buffer.slice(0,end);buffer=buffer.slice(end+1);if(!line)continue;
+          const event=JSON.parse(line);
+          if(event.type==="activity")setActivity(event.text);
+          if(event.type==="delta"){received+=event.text;setActivity("Respondendo…");flush();}
+          if(event.type==="done"){finished=true;setState(event.state);}
+          if(event.type==="error"||event.type==="stopped"){finished=true;received="";setMessages(old=>old.filter(m=>m.id!==assistantId));setNotice("A etapa foi salva. Peça ao COO para continuar o plano.");}
+        }
+      }
+      if(!finished)throw Error("A conexão foi interrompida. Reabra a conversa para conferir a próxima pergunta.");
+    }catch(e){received="";setMessages(old=>old.filter(m=>m.id!==assistantId));if(!controller.signal.aborted)setNotice(e instanceof Error?e.message:"Não foi possível continuar o plano.");}
+    finally{abortRef.current=null;busyRef.current=false;setBusy(false);setActivity("");router.refresh();}
   }
 
   async function send() {
@@ -94,7 +133,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
           setMessages(old=>[...old,{id:approvalMessageId,role:"USER",content:text},{id:crypto.randomUUID(),role:"ASSISTANT",content:answer}]);
           const fresh = await fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadIdRef.current)}`).then(r=>r.json());
           setState(fresh.workshop); setProposalRefresh(v=>v+1);setCanvasRefresh(v=>v+1);router.refresh();
-          busyRef.current=false;setBusy(false);setActivity("");return;
+          busyRef.current=false;setBusy(false);setActivity("");if(p.status==="APPLIED")await resumeInterview(p);return;
         }
       } catch(e) {
         setNotice(e instanceof Error?e.message:"Não foi possível confirmar.");setDraft(text);busyRef.current=false;setBusy(false);setActivity("");return;
@@ -155,7 +194,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
   }
 
   const attachedSources=new Set(messages.filter((m,index)=>m.role==="USER"&&messages[index+1]?.role==="ASSISTANT").map(m=>m.id));
-  const onProposalApplied=()=>{setNotice("Ação aplicada com sua aprovação.");setCanvasRefresh(v=>v+1);router.refresh();fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadId)}`).then(r=>r.json()).then(data=>{if(data.workshop!==undefined)setState(data.workshop);}).catch(()=>{});};
+  const onProposalApplied=(proposal:CooProposalView)=>{setNotice("Ação aplicada com sua aprovação.");setCanvasRefresh(v=>v+1);const approvalId=crypto.randomUUID();readingAnchor.current=approvalId;follow.current=false;setMessages(old=>[...old,{id:approvalId,role:"USER",content:`Aprovei: ${proposal.summary}`},{id:crypto.randomUUID(),role:"ASSISTANT",content:proposal.result?.message??"Ação aplicada."}]);router.refresh();fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadId)}`).then(r=>r.json()).then(data=>{if(data.workshop!==undefined)setState(data.workshop);}).catch(()=>{});void resumeInterview(proposal);};
   const onProposalChanged=(proposal:CooProposalView)=>setProposals(old=>old.map(p=>p.id===proposal.id?proposal:p));
   const onProposalAdjust=(text:string)=>{setDraft(text);document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Mensagem para o consultor"]')?.focus();};
 

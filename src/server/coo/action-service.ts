@@ -26,7 +26,8 @@ function guidePreview(raw: unknown) {
 }
 
 export function proposalView(row: CooActionProposal): CooProposalView {
-  return { id: row.id, threadId: row.threadId, sourceMessageId: row.sourceMessageId, summary: row.summary, details: row.details as string[], status: row.status, createdAt: row.createdAt.toISOString(), ...(row.result ? { result: row.result as CooActionResult } : {}) };
+  const action = object(row.action);
+  return { id: row.id, threadId: row.threadId, sourceMessageId: row.sourceMessageId, summary: row.summary, details: row.details as string[], status: row.status, createdAt: row.createdAt.toISOString(), resumeInterview: action.type === "workshop.start" || (action.type === "workshop.patch" && object(action.patch).stage !== "REVIEW"), ...(row.result ? { result: row.result as CooActionResult } : {}) };
 }
 
 async function authorize(db: DB, actor: ActionActor) {
