@@ -57,6 +57,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
   const scroll = useRef<HTMLDivElement>(null), follow = useRef(true), readingAnchor = useRef<string|null>(null);
   useEffect(() => { const node = scroll.current; if (node && follow.current) node.scrollTop = node.scrollHeight; }, [messages, activity]);
   useLayoutEffect(() => { const node=scroll.current,id=readingAnchor.current; if(!node||!id)return; const target=[...node.querySelectorAll<HTMLElement>("[data-message-id]")].find(element=>element.dataset.messageId===id); if(!target)return; node.scrollTop += target.getBoundingClientRect().top-node.getBoundingClientRect().top-24; readingAnchor.current=null; },[messages]);
+  useEffect(()=>{const node=scroll.current;if(!node)return;setAway(node.scrollHeight-node.scrollTop-node.clientHeight>90);},[messages]);
   useEffect(()=>{if(activeThreadId==="new")return;const controller=new AbortController();fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadId)}`,{signal:controller.signal}).then(async r=>{if(!r.ok)throw Error("Não foi possível carregar as propostas.");return r.json();}).then(data=>setProposals(data.proposals)).catch(()=>{});return()=>controller.abort();},[activeThreadId,proposalRefresh]);
   useEffect(() => {
     if (resumedOnOpen.current || initialGenerationId || currentThreadId === "new" || initialMessages.at(-1)?.role !== "ASSISTANT" || !initialMessages.at(-1)?.content.startsWith("Etapa de preparação salva.")) return;
@@ -108,7 +109,16 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
       }
       if(!finished)throw Error("A conexão foi interrompida. Reabra a conversa para conferir a próxima pergunta.");
     }catch(e){received="";setMessages(old=>old.filter(m=>m.id!==assistantId));if(!controller.signal.aborted)setNotice(e instanceof Error?e.message:"Não foi possível continuar o plano.");}
-    finally{abortRef.current=null;busyRef.current=false;setBusy(false);setActivity("");router.refresh();}
+    finally{
+      abortRef.current=null;busyRef.current=false;setBusy(false);setActivity("");router.refresh();
+      if(finished&&received)requestAnimationFrame(()=>{
+        const node=scroll.current,target=[...node?.querySelectorAll<HTMLElement>("[data-message-id]")??[]].find(element=>element.dataset.messageId===assistantId);
+        if(!node||!target)return;
+        const below=target.getBoundingClientRect().bottom-node.getBoundingClientRect().bottom+16;
+        if(below>0)node.scrollTop+=below;
+        setAway(node.scrollHeight-node.scrollTop-node.clientHeight>90);
+      });
+    }
   }
 
   async function send() {
