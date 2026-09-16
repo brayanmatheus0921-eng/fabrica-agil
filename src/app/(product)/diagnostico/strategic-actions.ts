@@ -79,8 +79,9 @@ export async function finishStrategicDiagnostic(formData: FormData) {
     await tx.bottleneckAssessment.updateMany({ where: { companyId: (await requireAuth()).companyId, status: "ACTIVE" }, data: { status: "MONITORING" } });
     await tx.bottleneckAssessment.create({ data: { companyId: (await requireAuth()).companyId, diagnosticSessionId: session.id, category: top.theme, title: `Oportunidade de melhoria: ${top.theme}`, description: `${top.theme} está em ${top.matrixLabel}, com desempenho de ${top.performanceScore}/100, ${top.noCount} desvios completos e ${top.partialCount} desvios parciais.`, evidenceSnapshot: top as never, urgencyScore: top.quadrant === "URGENT_ACTION" ? 3 : top.quadrant === "IMPROVEMENTS" ? 2 : 1, status: "ACTIVE" } });
     await tx.diagnosticSession.update({ where: { id: session.id }, data: { status: "COMPLETED", completedAt: new Date(), title: `Identificação Estratégica Operacional · ${new Intl.DateTimeFormat("pt-BR").format(new Date())}`, resultSummary: analysisStatus === "COMPLETED" ? `${matrixCounts.URGENT_ACTION} tema(s) em ação urgente e ${matrixCounts.IMPROVEMENTS} em melhorias.` : "Matriz concluída; a leitura do COO precisa ser gerada novamente.", resultSnapshot: { methodCode: STRATEGIC_OPERATIONAL_METHOD_CODE, methodVersion: session.template.version, themes, matrixCounts, analysisStatus, analysisError, analysis } as never } });
+    await tx.company.updateMany({ where: { id: session.companyId, onboardingStatus: "IN_PROGRESS" }, data: { onboardingStatus: "COMPLETED" } });
     await tx.companyMemory.create({ data: { companyId: (await requireAuth()).companyId, kind: "FACT", title: "Diagnóstico estratégico operacional", content: `Matriz concluída. Primeira oportunidade indicada: ${top.theme}.`, sourceType: "DIAGNOSTIC", sourceId: session.id } });
   });
-  revalidatePath("/diagnostico"); revalidatePath("/dashboard"); revalidatePath("/assistente");
+  revalidatePath("/"); revalidatePath("/onboarding"); revalidatePath("/empresa"); revalidatePath("/diagnostico"); revalidatePath("/dashboard"); revalidatePath("/assistente");
   redirect(`/diagnostico?id=${session.id}&completed=1`);
 }

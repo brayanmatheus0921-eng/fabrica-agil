@@ -13,11 +13,12 @@ import { prepareAction, proposeAction, proposalView } from "@/server/coo/action-
 import { readSystem, systemQuerySchema } from "@/server/coo/read-system";
 import { interviewResumeEligible, type CooAction } from "@/core/coo-actions";
 import { COO_ACTION_INSTRUCTIONS } from "@/server/coo/instructions";
-import { WORKSHOP_AGENT_INSTRUCTIONS, groundedInterviewSchema, renderInterviewQuestion } from "@/server/ai/workshop-agent";
+import { WORKSHOP_AGENT_INSTRUCTIONS, completePlanExecution, groundedInterviewSchema, renderInterviewQuestion } from "@/server/ai/workshop-agent";
 import { canvasSchema, validateCanvas } from "@/core/workspace-artifacts";
 import { CANVAS_INSTRUCTIONS } from "@/server/ai/artifact-agent";
 import { taskProgress } from "@/core/task-progress";
 import { findReusableCanvas } from "@/server/artifact-deduplication";
+import { resolveCooMode } from "@/core/coo-mode";
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
@@ -87,6 +88,10 @@ export async function POST(request: Request) {
         const context = await loadCompanyContext(auth.companyId);
         const diagnosis = current ? await prisma.diagnosticSession.findFirst({ where: { id: current.diagnosticId, companyId: auth.companyId, status: "COMPLETED" }, include: { answers: { include: { question: true } } } }) : null;
         if (current && !diagnosis) throw new Error("Diagnóstico indisponível");
+        const selectedPlan = current?.planId ? await prisma.actionPlan.findFirst({ where: { id: current.planId, companyId: auth.companyId }, include: { tasks: { include: { evidence: { orderBy: { createdAt: "desc" }, take: 100 } } }, checkins: { orderBy: { createdAt: "desc" }, take: 5 } } }) : null;
+        const progressPlan = selectedPlan ?? (!current ? await prisma.actionPlan.findFirst({ where: { companyId: auth.companyId, status: "ACTIVE" }, orderBy: { createdAt: "desc" }, include: { tasks: { include: { evidence: true } } } }) : null);
+        const planTasks = progressPlan?.tasks.filter(task => task.status !== "CANCELLED") ?? [];
+        const mode = resolveCooMode({ workshopStage: current?.stage ?? null, hasCompletedDiagnostic: Boolean(diagnosis || context.diagnostic?.status === "COMPLETED"), activeTaskCount: planTasks.length, pendingTaskCount: planTasks.filter(task => task.status !== "DONE").length });
         const methods = await prisma.improvementMethod.findMany({ where: { status: "ACTIVE" }, include: { versions: { where: { publishedAt: { not: null } }, orderBy: { version: "desc" }, take: 1 } } });
         const catalog = methods.filter(m => m.versions.length).map(m => ({ code: m.code, name: m.name, description: m.description, steps: m.versions[0].steps }));
         async function stageAction(raw: unknown) {
@@ -99,7 +104,8 @@ export async function POST(request: Request) {
         }
         const propose = tool({ name: "propor_acao", description: "Prepara uma única alteração para aprovação humana. Nunca executa. actionJson deve seguir o catálogo de ações nas instruções.", parameters: z.object({ actionJson: z.string() }), execute: async ({actionJson}) => { try { return await stageAction(JSON.parse(actionJson)); } catch { return "JSON inválido; corrija os campos."; } } });
         const consult = tool({ name: "consultar_sistema", description: "Consulta registros reais por empresa, ID, projeto e nome; use paginação. Use para identificar o destino antes de propor qualquer alteração. Somente leitura.", parameters: systemQuerySchema, execute: async q => JSON.stringify(await readSystem(prisma,auth.companyId,q)) });
-        const skill = current ? await readFile(path.join(process.cwd(), "docs/ai/skills/coo-plano-colaborativo/SKILL.md"), "utf8") : "";
+        const planningSkill = current ? await readFile(path.join(process.cwd(), "docs/ai/skills/coo-plano-colaborativo/SKILL.md"), "utf8") : "";
+        const modeSkill = await readFile(path.join(process.cwd(), "docs/ai/skills/coo-modos-de-trabalho/SKILL.md"), "utf8");
         const createCanvas = tool({ name: "criar_ferramenta_canvas", description: "Cria ou reutiliza no Canvas uma planilha ou documento editável pedido ou aceito pelo gestor. Para uma ferramenta repetida, use REUSE. Se o usuário pedir funções novas e já existir uma versão, primeiro pergunte se deseja manter a antiga ou substituí-la; só depois use KEEP_BOTH ou REPLACE conforme a resposta. Não altera tarefas ou aprovações. " + CANVAS_INSTRUCTIONS, parameters: canvasSchema.extend({ taskId: z.string().nullable(), duplicateHandling: z.enum(["REUSE", "KEEP_BOTH", "REPLACE"]) }), execute: async raw => {
           const content = validateCanvas(raw);
           if (raw.taskId && !await prisma.task.findFirst({ where: { id: raw.taskId, companyId: auth.companyId, ...(current?.planId ? {actionPlanId: current.planId} : {}) } })) return "Tarefa inválida. Use uma tarefa deste plano ou null.";
@@ -107,32 +113,31 @@ export async function POST(request: Request) {
           if (existing && raw.duplicateHandling === "REUSE") return `A ferramenta já existe: ${existing.title}. Está em Ferramentas e arquivos. Nenhuma alteração feita.`;
           return stageAction({ type:"artifact.save", content, taskId:raw.taskId, replaceArtifactId:existing && raw.duplicateHandling === "REPLACE" ? existing.id : null });
         }});
-        const interviewing=Boolean(current && current.stage!=="FOLLOW_UP");
-        const agent = new Agent({ name: "COO Fábrica Ágil", model: env.OPENAI_MODEL ?? "gpt-5.6-luna", tools: (resumeProposalId&&!resumeExecution) || interviewing ? [consult] : [consult, propose, createCanvas],
-          instructions: `${interviewing ? `${skill}\n${WORKSHOP_AGENT_INSTRUCTIONS}` : `${INDUSTRIAL_CONSULTANT_INSTRUCTIONS}\n${COO_ACTION_INSTRUCTIONS}`}${resumeExecution ? "\nO plano completo acabou de ser aprovado pela plataforma. Consulte suas tarefas e formulários. Explique o primeiro passo com link para a tarefa. Se houver necessidade de documento ou planilha complementar ainda inexistente, prepare uma proposta de ferramenta vinculada a essa tarefa para aprovação; não execute nada. Não recrie formulários que já estão no guia. Não pergunte de novo os acordos já confirmados." : resumeProposalId ? "\nEsta resposta retoma a conversa imediatamente após a aprovação de uma etapa preparatória. Não há nova resposta do gestor. Explique em uma frase o que foi salvo e faça uma pergunta concreta sobre o próximo dado indispensável para construir um plano completo com 3 a 5 iniciativas e 5W2H. Não valide hipóteses por aprovação de etapa. Não proponha nem execute ações neste turno. Uma medição ausente pode entrar como primeira iniciativa; não deixe a entrevista parada esperando uma semana de dados." : ""}`,
+        const interviewing=mode==="PLANNING";
+        const planLocked=mode==="PLAN_REQUIRED";
+        const agent = new Agent({ name: "COO Fábrica Ágil", model: env.OPENAI_MODEL ?? "gpt-5.6-luna", tools: (resumeProposalId&&!resumeExecution) || interviewing || planLocked ? [consult] : [consult, propose, createCanvas],
+          instructions: `${modeSkill}\n\nMODO DEFINIDO PELO SERVIDOR: ${mode}. Não troque de modo.\n${interviewing ? `${planningSkill}\n${WORKSHOP_AGENT_INSTRUCTIONS}` : `${INDUSTRIAL_CONSULTANT_INSTRUCTIONS}\n${COO_ACTION_INSTRUCTIONS}`}${planLocked ? `\nExiste diagnóstico concluído, mas não há plano aprovado nesta empresa. Não proponha tarefas, projetos, ferramentas ou execução. Oriente o gestor a abrir [o resultado do diagnóstico](/diagnostico?id=${context.diagnostic?.id ?? ""}#proximo-passo) e clicar em Montar plano com o COO.` : ""}${resumeExecution ? "\nO plano completo acabou de ser aprovado pela plataforma. Consulte suas tarefas e formulários. Explique o primeiro passo com link para a tarefa. Se houver necessidade de documento ou planilha complementar ainda inexistente, prepare uma proposta de ferramenta vinculada a essa tarefa para aprovação; não execute nada. Não recrie formulários que já estão no guia. Não pergunte de novo os acordos já confirmados." : resumeProposalId ? "\nEsta resposta retoma a conversa imediatamente após a aprovação de uma etapa preparatória. Não há nova resposta do gestor. Explique em uma frase o que foi salvo e faça uma pergunta concreta sobre o próximo dado indispensável para construir um plano completo com 3 a 5 iniciativas e 5W2H. Não valide hipóteses por aprovação de etapa. Não proponha nem execute ações neste turno. Uma medição ausente pode entrar como primeira iniciativa; não deixe a entrevista parada esperando uma semana de dados." : ""}`,
         });
         // Selected diagnosis is authoritative; historical model prose is not matrix evidence.
         const snapshot = diagnosis?.resultSnapshot && typeof diagnosis.resultSnapshot === "object" ? { ...diagnosis.resultSnapshot as object } as Record<string, unknown> : null;
         if (snapshot) { delete snapshot.analysis; delete snapshot.analysisError; }
-        const selectedPlan = current?.planId ? await prisma.actionPlan.findFirst({ where: { id: current.planId, companyId: auth.companyId }, include: { tasks: { include: { evidence: { orderBy: { createdAt: "desc" }, take: 100 } } }, checkins: { orderBy: { createdAt: "desc" }, take: 5 } } }) : null;
-        const progressPlan = selectedPlan ?? (!current ? await prisma.actionPlan.findFirst({ where: { companyId: auth.companyId, status: "ACTIVE" }, orderBy: { createdAt: "desc" }, include: { tasks: { include: { evidence: true } } } }) : null);
         const artifacts = await prisma.workspaceArtifact.findMany({ where: { companyId: auth.companyId, OR: [{threadId}, ...(progressPlan ? [{taskId: {in: progressPlan.tasks.map(t=>t.id)}}] : [])] }, select: {id:true,title:true,taskId:true,kind:true,confirmedAt:true,interpretation:true}, orderBy:{updatedAt:"desc"},take:30 });
         const automaticProgress = progressPlan ? taskProgress(progressPlan.tasks, artifacts) : null;
         const scopedContext = current ? { company: context.company, selectedPlan, memories: context.memories, note: "Use exclusivamente o diagnóstico selecionado abaixo. Memórias são contexto histórico, não substituem a matriz." } : context;
         const projects = await readSystem(prisma, auth.companyId, {area:"projects",query:"",projectId:null,recordId:null,offset:0});
-        const input = JSON.stringify({ today: new Date().toLocaleDateString("sv-SE", {timeZone:"America/Sao_Paulo"}), projects, context: scopedContext, automaticProgress, artifacts: artifacts.map(a=>({...a, interpretation:a.confirmedAt?a.interpretation:null, notice:a.confirmedAt?"Leitura confirmada pelo usuário; não prova independente.":"Rascunho ou leitura pendente; não usar como resultado."})), workshop: current, diagnosis: diagnosis ? { id: diagnosis.id, title: diagnosis.title, matrix: snapshot, answers: diagnosis.answers.map(a => ({ code: a.question.code, question: a.question.prompt, value: a.value, notes: a.notes })) } : null, methods: catalog, messages: [...thread.messages].reverse().map(m => ({ id: m.id, role: m.role, content: m.content })), ...(resumeProposalId ? { continuation: resumeExecution ? "Plano completo aprovado: organizar ferramentas necessárias e primeiro passo nas tarefas existentes." : "Aprovação de etapa preparatória; fazer a próxima pergunta sem afirmar que o plano foi aprovado." } : {}) });
+        const input = JSON.stringify({ today: new Date().toLocaleDateString("sv-SE", {timeZone:"America/Sao_Paulo"}), cooMode: mode, projects, context: scopedContext, automaticProgress, artifacts: artifacts.map(a=>({...a, interpretation:a.confirmedAt?a.interpretation:null, notice:a.confirmedAt?"Leitura confirmada pelo usuário; não prova independente.":"Rascunho ou leitura pendente; não usar como resultado."})), workshop: current, diagnosis: diagnosis ? { id: diagnosis.id, title: diagnosis.title, matrix: snapshot, answers: diagnosis.answers.map(a => ({ code: a.question.code, question: a.question.prompt, value: a.value, notes: a.notes })) } : null, methods: catalog, messages: [...thread.messages].reverse().map(m => ({ id: m.id, role: m.role, content: m.content })), ...(resumeProposalId ? { continuation: resumeExecution ? "Plano completo aprovado: organizar ferramentas necessárias e primeiro passo nas tarefas existentes." : "Aprovação de etapa preparatória; fazer a próxima pergunta sem afirmar que o plano foi aprovado." } : {}) });
         emit({ type: "activity", text: "Preparando uma resposta e o próximo passo…" });
         if(interviewing){
           const responseSchema=groundedInterviewSchema(thread.messages.filter(m=>m.role==="USER").map(m=>m.id),diagnosis?.answers.map(a=>a.question.code)??[],catalog.map(m=>m.code));
-          const interviewer=new Agent({name:"COO planejamento",model:agent.model,instructions:agent.instructions as string,tools:[consult],outputType:responseSchema,modelSettings:{reasoning:{effort:"low"}}});
+          const interviewer=new Agent({name:"COO planejamento",model:env.OPENAI_MODEL ?? "gpt-5.6-sol",instructions:agent.instructions as string,tools:[consult],outputType:responseSchema,modelSettings:{reasoning:{effort:"medium"}}});
           let correction="";
-          for(let attempt=0;attempt<2;attempt++){
+          for(let attempt=0;attempt<3;attempt++){
             try{
               const response=await run(interviewer,input+correction,{signal:controller.signal,maxTurns:8});
               const answer=responseSchema.parse(response.finalOutput);
               if(answer.proposal){
                 if(resumeProposalId)throw Error("Retomada: faça a próxima pergunta; ainda não há nova resposta do gestor.");
-                const prepared=await prepareAction(prisma,auth,threadId,{type:"workshop.patch",patch:answer.proposal});
+                const prepared=await prepareAction(prisma,auth,threadId,{type:"workshop.patch",patch:{...answer.proposal,plan:completePlanExecution(answer.proposal.plan)}});
                 actionDraft=prepared.action;
                 text=`${answer.reply.trim()}\n\n${prepared.summary}`;
               }else{
@@ -140,7 +145,7 @@ export async function POST(request: Request) {
               }
               break;
             }catch(error){
-              if(attempt||controller.signal.aborted)throw error;
+              if(attempt===2||controller.signal.aborted)throw error;
               correction=`\nCorrija sua resposta anterior: ${error instanceof Error?error.message:"Resposta inválida"}. Prepare a proposta completa se os dados já existem; caso contrário faça a pergunta que falta. Não exponha esta validação ao gestor.`;
               emit({type:"activity",text:"Conferindo o plano e os dados combinados…"});
             }

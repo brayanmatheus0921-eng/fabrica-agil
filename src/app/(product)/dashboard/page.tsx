@@ -3,6 +3,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ReadingDetails } from "@/components/reading-layout";
 import { cooPlanSchema } from "@/core/coo-workshop";
+import { readWorkshop } from "@/core/coo-workshop";
+import { resolveCompanyJourney } from "@/core/company-journey";
+import { GeneratePlanButton } from "@/app/(product)/diagnostico/generate-plan-button";
 import {
   ArrowRight,
   Activity,
@@ -20,21 +23,13 @@ import { PageHeader } from "@/components/page-header";
 import { SectionCard, StatusPill } from "@/components/ui";
 import { getBottleneckCopy } from "@/core/guided-journey";
 import { prisma } from "@/lib/prisma";
-import { getDevCompany } from "@/server/dev-company";
 
 export const metadata: Metadata = { title: "Início" };
 export const dynamic = "force-dynamic";
 
-type NextStep = {
-  eyebrow: string;
-  title: string;
-  description: string;
-  href: string;
-  label: string;
-};
-
 export default async function DashboardPage() {
-  const company = await getDevCompany();
+  const auth = await requireAuth();
+  const company = auth.company;
   const profile =
     company.onboardingData &&
     typeof company.onboardingData === "object" &&
@@ -48,10 +43,10 @@ export default async function DashboardPage() {
     "reworkRange",
     "ownerDependency",
   ].every((key) => typeof profile[key] === "string" && String(profile[key]));
-  const [diagnostic, assessment, activePlans, memoryCount] = await Promise.all([
+  const [diagnostic, assessment, activePlans, memoryCount, workflowThreads] = await Promise.all([
     prisma.diagnosticSession.findFirst({
       where: {
-        companyId: (await requireAuth()).companyId,
+        companyId: company.id,
         status: "COMPLETED",
         template: { domain: "OPERATIONS" },
       },
@@ -69,7 +64,7 @@ export default async function DashboardPage() {
       },
     }),
     prisma.bottleneckAssessment.findFirst({
-      where: { companyId: (await requireAuth()).companyId, status: "ACTIVE" },
+      where: { companyId: company.id, status: "ACTIVE" },
       orderBy: { detectedAt: "desc" },
       include: {
         recommendations: {
@@ -86,7 +81,7 @@ export default async function DashboardPage() {
       },
     }),
     prisma.actionPlan.findMany({
-      where: { companyId: (await requireAuth()).companyId, status: "ACTIVE" },
+      where: { companyId: company.id, status: "ACTIVE" },
       orderBy: { updatedAt: "desc" },
       include: {
         tasks: { where: { status: { not: "CANCELLED" } }, orderBy: { sortOrder: "asc" } },
@@ -94,20 +89,17 @@ export default async function DashboardPage() {
       },
     }),
     prisma.companyMemory.count({
-      where: { companyId: (await requireAuth()).companyId, invalidatedAt: null },
+      where: { companyId: company.id, invalidatedAt: null },
     }),
+    prisma.conversationThread.findMany({ where: { companyId: company.id }, orderBy: { updatedAt: "desc" }, take: 20, select: { id: true, workflowState: true } }),
   ]);
 
   const activePlan = activePlans[0] ?? null;
-  const onboardingComplete = company.onboardingStatus === "COMPLETED";
-  const recommendation = assessment?.recommendations[0];
-  const planCreated = Boolean(recommendation?.actionPlans[0]);
+  const onboardingComplete = company.onboardingStatus === "COMPLETED" || Boolean(diagnostic);
   const completedTasks =
     activePlan?.tasks.filter((task) => task.status === "DONE").length ?? 0;
   const taskCount = activePlan?.tasks.length ?? 0;
-  const nextTask = activePlan?.tasks.find((task) =>
-    ["TODO", "IN_PROGRESS"].includes(task.status),
-  );
+  const nextTask = activePlan?.tasks.find((task) => task.status === "IN_PROGRESS") ?? activePlan?.tasks.find((task) => task.status === "TODO") ?? activePlan?.tasks.find((task) => task.status === "BACKLOG");
   const executionPercent =
     taskCount === 0 ? 0 : Math.round((completedTasks / taskCount) * 100);
   const allProjectTasks = activePlans.flatMap((plan) => plan.tasks);
@@ -117,68 +109,8 @@ export default async function DashboardPage() {
 
   const parsedPlan = cooPlanSchema.safeParse(activePlan?.targetOutcome);
   const primaryInitiative = parsedPlan.success ? parsedPlan.data.initiatives.find(item => item.kind === "PRIMARY") : null;
-  const nextAction = parsedPlan.success && nextTask ? parsedPlan.data.initiatives.flatMap(item => item.actions)[activePlan!.tasks.findIndex(task => task.id === nextTask.id)] : null;
-  let nextStep: NextStep;
-  if (!onboardingComplete) {
-    nextStep = {
-      eyebrow: "Primeiro passo",
-      title: "Conte como sua fábrica funciona",
-      description:
-        "O cadastro ajuda o COO a entender a realidade da fábrica.",
-      href: "/onboarding",
-      label: "Cadastrar empresa",
-    };
-  } else if (!profileComplete) {
-    nextStep = {
-      eyebrow: "Contexto incompleto",
-      title: "Complete 5 dados rápidos da empresa",
-      description:
-        "Informe faturamento por faixa, volume, prazo, retrabalho e dependência do dono. Isso evita um diagnóstico genérico.",
-      href: "/empresa",
-      label: "Completar perfil",
-    };
-  } else if (!diagnostic) {
-    nextStep = {
-      eyebrow: "Próximo passo",
-      title: "Encontre o gargalo da operação",
-      description:
-        "O ROTA 30 avalia a operação e indica o principal gargalo para trabalhar.",
-      href: "/diagnostico",
-      label: "Abrir diagnóstico",
-    };
-  } else if (activePlan) {
-    nextStep = nextTask ? {
-      eyebrow: "Seu próximo passo",
-      title: nextAction?.execution?.steps[0]?.title ?? nextTask.title,
-      description: nextAction?.execution?.steps[0]?.instruction ?? "Abra a tarefa para consultar as instruções e registrar o avanço.",
-      href: `/tarefas/${nextTask.id}`, label: "Abrir próximo passo",
-    } : {
-      eyebrow: "Hora de conferir", title: "Vamos revisar os resultados",
-      description: "Compare os registros com o ponto de partida junto do consultor.",
-      href: "/acompanhamento", label: "Acompanhar resultados",
-    };
-  } else if (!assessment || !recommendation || !planCreated) {
-    nextStep = {
-      eyebrow: "Diagnóstico concluído",
-      title: "Revise o plano antes de agir",
-      description:
-        "Veja o que está acontecendo e peça ao COO para montar o próximo passo com você.",
-      href:
-        diagnostic?.template.domain === "OPERATIONS"
-          ? `/diagnostico/orientacao?id=${diagnostic.id}`
-          : "/gargalo",
-      label: "Revisar plano",
-    };
-  } else {
-    nextStep = {
-      eyebrow: "Hora de medir",
-      title: "Conte ao COO o que mudou",
-      description:
-        "O plano terminou. Compare os resultados com o diagnóstico e decida se o gargalo foi resolvido.",
-      href: "/acompanhamento",
-      label: "Fazer check-in",
-    };
-  }
+  const workshop = workflowThreads.map((thread) => ({ threadId: thread.id, state: readWorkshop(thread.workflowState) })).find((item) => item.state && item.state.diagnosticId === diagnostic?.id && item.state.stage !== "FOLLOW_UP") ?? null;
+  const nextStep = resolveCompanyJourney({ onboardingComplete, profileComplete, diagnosticId: diagnostic?.id ?? null, workshop: workshop?.state ? { threadId: workshop.threadId, stage: workshop.state.stage } : null, activePlan: activePlan ? { id: activePlan.id, nextTaskId: nextTask?.id ?? null, taskCount, completedTasks } : null });
 
   const journey = [
     {
@@ -187,18 +119,18 @@ export default async function DashboardPage() {
       done: Boolean(diagnostic),
     },
     {
-      label: "Oportunidade",
-      detail: primaryInitiative?.title ?? (assessment ? assessment.category : diagnostic ? "Confira no resultado" : "Aguardando diagnóstico"),
-      done: Boolean(assessment || primaryInitiative),
-    },
-    {
       label: "Plano",
       detail: activePlan
         ? `${executionPercent}% executado`
-        : planCreated
-          ? "Criado"
-          : "Ainda não criado",
-      done: Boolean(activePlan || planCreated),
+        : workshop
+          ? "Em construção com o COO"
+          : "Ainda não iniciado",
+      done: Boolean(activePlan),
+    },
+    {
+      label: "Execução",
+      detail: activePlan ? `${completedTasks} de ${taskCount} tarefas concluídas` : "Liberada após aprovar o plano",
+      done: Boolean(activePlan && taskCount > 0 && completedTasks === taskCount),
     },
     {
       label: "Acompanhamento",
@@ -239,17 +171,11 @@ export default async function DashboardPage() {
               {nextStep.description}
             </p>
           </div>
-          <Link
-            href={nextStep.href}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b3156] px-5 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#102b48] lg:w-auto"
-          >
-            {nextStep.label}
-            <ArrowRight aria-hidden="true" className="size-4" />
-          </Link>
+          {nextStep.kind === "RESULT" && diagnostic ? <GeneratePlanButton sessionId={diagnostic.id} label={nextStep.label} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b3156] px-5 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#102b48] disabled:opacity-60 lg:w-auto" /> : <Link href={nextStep.href} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b3156] px-5 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#102b48] lg:w-auto">{nextStep.label}<ArrowRight aria-hidden="true" className="size-4" /></Link>}
         </div>
       </SectionCard>
 
-      <section aria-label="Resumo da execução" className="grid gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-2 xl:grid-cols-4">
+      {activePlan ? <section aria-label="Resumo da execução" className="grid gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-2 xl:grid-cols-4">
         {[
           { icon: Target, label: primaryInitiative ? "Prioridade atual" : "Oportunidade encontrada", value: primaryInitiative?.title ?? bottleneckCopy?.title ?? "Ver no diagnóstico", detail: assessment || primaryInitiative ? "Foco recomendado" : "Ainda sem oportunidade definida" },
           { icon: FolderKanban, label: "Projetos ativos", value: String(activePlans.length), detail: activePlans.length === 1 ? "1 frente em execução" : `${activePlans.length} frentes em execução` },
@@ -262,9 +188,9 @@ export default async function DashboardPage() {
             <p className="mt-1 truncate text-[11px] text-muted">{detail}</p>
           </div>
         ))}
-      </section>
+      </section> : null}
 
-      <SectionCard className="p-5 sm:p-6">
+      {activePlan ? <SectionCard className="p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Projetos em andamento</h2>
@@ -272,7 +198,7 @@ export default async function DashboardPage() {
           </div>
           <Link href="/tarefas" className="inline-flex items-center gap-2 text-xs font-semibold">Ver todos<ArrowRight className="size-4" /></Link>
         </div>
-        {activePlans.length ? <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{activePlans.slice(0, 3).map((plan) => {
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{activePlans.slice(0, 3).map((plan) => {
           const done = plan.tasks.filter((task) => task.status === "DONE").length;
           const progress = plan.tasks.length ? Math.round((done / plan.tasks.length) * 100) : 0;
           return <Link key={plan.id} href={`/tarefas?project=${plan.id}`} className="rounded-xl border bg-white p-4 transition hover:border-[#bfc7d1] hover:shadow-[0_10px_26px_rgba(11,19,32,0.05)]">
@@ -281,8 +207,8 @@ export default async function DashboardPage() {
             <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-surface-muted"><div className="h-full rounded-full bg-[#0b3156]" style={{ width: `${progress}%` }} /></div>
             <div className="mt-3 flex items-center justify-between text-[10px] text-muted"><span>{done}/{plan.tasks.length} tarefas</span><span className="inline-flex items-center gap-1"><CalendarClock className="size-3" />{plan.dueAt?.toLocaleDateString("pt-BR") ?? "Sem prazo"}</span></div>
           </Link>;
-        })}</div> : <div className="mt-5 rounded-xl border border-dashed bg-surface-muted p-6 text-center"><p className="text-sm font-semibold">Nenhum projeto em andamento</p><p className="mt-1 text-xs text-muted">Crie uma frente manual ou monte um plano com o COO.</p></div>}
-      </SectionCard>
+        })}</div>
+      </SectionCard> : null}
 
       <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <SectionCard className="p-5 sm:p-7">

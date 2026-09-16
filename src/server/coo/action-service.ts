@@ -8,6 +8,7 @@ import { activateDraftPlan } from "@/server/plans/approve-plan";
 import { persistWorkshopPlan } from "@/server/ai/workshop-persistence";
 import { readExecutionGuide, validateFormValues, validateProductionEvent } from "@/core/task-execution";
 import { readRecords, eventsFrom } from "@/core/task-records";
+import { assertApprovedPlanForAction } from "@/core/coo-mode";
 
 type DB = Prisma.TransactionClient;
 export type ActionActor = { companyId: string; userId: string; membershipId: string };
@@ -40,6 +41,10 @@ async function inspect(db: DB, actor: ActionActor, threadId: string, a: CooActio
   const thread = required(await db.conversationThread.findFirst({ where: { id: threadId, companyId } }), "Conversa");
   const workflow=readWorkshop(thread.workflowState);
   assertCooWorkflow(workflow,a);
+  if (["project.create", "task.create", "artifact.save"].includes(a.type)) {
+    const hasActivePlan = Boolean(await db.actionPlan.findFirst({ where: { companyId, status: "ACTIVE" }, select: { id: true } }));
+    assertApprovedPlanForAction(hasActivePlan, a);
+  }
   const plan = async (id: string, active = false) => {
     const row = required(await db.actionPlan.findFirst({ where: { id, companyId }, include: { tasks: { orderBy: { id: "asc" } } } }), "Projeto");
     if (active && row.status !== "ACTIVE") throw new Error("O projeto precisa estar ativo para essa ação.");

@@ -7,4 +7,5 @@ test("entrevista não pode terminar sem pergunta nem pedir aprovação sem propo
     assert.throws(()=>renderInterviewQuestion("Entendi.",question));
   }
   assert.equal(renderInterviewQuestion("Há retrabalho.","Quem fará a conferência?"),"Há retrabalho.\n\nQuem fará a conferência?");
+  assert.equal(renderInterviewQuestion("Há retrabalho.","Qual caso ocorreu? Dê um exemplo recente."),"Há retrabalho.\n\nQual caso ocorreu? Dê um exemplo recente?");
 });

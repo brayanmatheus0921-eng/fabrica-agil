@@ -1,6 +1,7 @@
 ﻿import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getDevCompany } from "@/server/dev-company";
+import { prisma } from "@/lib/prisma";
 import { FirstAccessFlow } from "./first-access-flow";
 
 export const metadata: Metadata = { title: "Primeiro acesso" };
@@ -24,6 +25,8 @@ export default async function FirstAccessPage({
   const company = await getDevCompany();
   if (company.onboardingStatus === "COMPLETED") redirect("/empresa");
   if (company.onboardingStatus === "IN_PROGRESS") {
+    const completed = await prisma.diagnosticSession.findFirst({ where: { companyId: company.id, status: "COMPLETED" }, orderBy: { completedAt: "desc" }, select: { id: true } });
+    if (completed) redirect(`/diagnostico?id=${completed.id}`);
     redirect("/diagnostico/novo?onboarding=1");
   }
   const params = await searchParams;

@@ -1,21 +1,43 @@
 
-import { executableWorkshopPatchSchema, executableCooPlanSchema, workshopPatchSchema } from "@/core/coo-workshop";
+import { cooActionSchema, cooPlanSchema, workshopPatchSchema } from "@/core/coo-workshop";
+import { executionGuideSchema } from "@/core/task-execution";
 import { z } from "zod";
+
+const compactPlanSchema=cooPlanSchema.extend({initiatives:z.array(cooPlanSchema.shape.initiatives.element.extend({actions:z.array(cooActionSchema.omit({execution:true})).min(1).max(3)})).min(3).max(5)});
 
 export const interviewResponseSchema=z.object({
   reply:z.string().min(1),
   question:z.string().nullable(),
-  proposal:executableWorkshopPatchSchema.extend({
+  proposal:workshopPatchSchema.extend({
     stage:z.literal("REVIEW"),
     decision:workshopPatchSchema.shape.decision.unwrap(),
     planningAgreement:workshopPatchSchema.shape.planningAgreement.unwrap().unwrap(),
-    plan:executableCooPlanSchema.extend({initiatives:executableCooPlanSchema.shape.initiatives.min(3)}),
+    plan:compactPlanSchema,
   }).nullable(),
 });
 
+export function completePlanExecution(plan:z.infer<typeof compactPlanSchema>){
+  return {...plan,initiatives:plan.initiatives.map(initiative=>({...initiative,actions:initiative.actions.map(action=>({...action,execution:executionGuideSchema.parse({
+    steps:[
+      {title:"Preparar",instruction:`Alinhar com ${action.who} o que será feito: ${action.what}.`,doneWhen:`Responsável e entrega ${action.proof} confirmados.`},
+      {title:"Executar e registrar",instruction:`${action.how} Registre o resultado e a evidência ao concluir.`,doneWhen:`${action.proof} registrado na tarefa.`},
+    ],
+    recording:{kind:"FORM",title:`Registro de ${action.what}`,unit:"ocorrência",instructions:`Registre cada execução necessária para acompanhar ${action.indicator}.`,fields:[
+      {key:"contexto",label:"Contexto da execução",hint:"Identifique pedido, processo ou situação.",example:"Pedido fictício 001",type:"TEXT",required:true},
+      {key:"resultado_observado",label:"Resultado observado",hint:"Descreva o que aconteceu sem estimar ganhos.",example:"Conferência concluída e divergência registrada",type:"TEXT",required:true},
+      {key:"valor_indicador",label:`Valor de ${action.indicator}`,hint:"Informe o valor medido quando existir.",example:"2",type:"NUMBER",required:false},
+    ]},
+    completionCriteria:`Concluir ${action.proof} dentro de ${action.whenDays} dias.`,
+    improvementCriteria:`Comparar ${action.indicator}: base ${action.baseline}; meta ${action.target}.`,
+    reviewQuestion:`A evidência confirma avanço em ${action.indicator}?`,
+  })}))}))};
+}
+
 export function renderInterviewQuestion(reply:string,question:string|null){
   if(!question?.includes("?")||/posso.{0,30}(aprovar|salvar|criar|liberar|gerar)/i.test(question))throw Error("Faça a próxima pergunta de negócio ou preencha proposal completo. Não peça aprovação sem proposta.");
-  return `${reply.trim()}\n\n${question.trim()}`;
+  const cleanQuestion=question.trim();
+  const finalQuestion=/\?\s*$/.test(cleanQuestion)?cleanQuestion:`${cleanQuestion.replace(/[.!]+\s*$/,"")}?`;
+  return `${reply.trim()}\n\n${finalQuestion}`;
 }
 
 export function groundedInterviewSchema(userIds:string[],evidenceCodes:string[],methodCodes:string[]){

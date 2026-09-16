@@ -2,6 +2,7 @@ import { z } from "zod";
 import { canvasSchema } from "./workspace-artifacts";
 import { executableWorkshopPatchSchema, type WorkshopState } from "./coo-workshop";
 import { productionEventSchema } from "./task-execution";
+export { assertApprovedPlanForAction } from "./coo-mode";
 
 const id = z.string().trim().min(1).max(200);
 const title = z.string().trim().min(3).max(180);
