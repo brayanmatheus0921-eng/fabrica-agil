@@ -57,7 +57,13 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
   const scroll = useRef<HTMLDivElement>(null), follow = useRef(true), readingAnchor = useRef<string|null>(null);
   useEffect(() => { const node = scroll.current; if (node && follow.current) node.scrollTop = node.scrollHeight; }, [messages, activity]);
   useLayoutEffect(() => { const node=scroll.current,id=readingAnchor.current; if(!node||!id)return; const target=[...node.querySelectorAll<HTMLElement>("[data-message-id]")].find(element=>element.dataset.messageId===id); if(!target)return; node.scrollTop += target.getBoundingClientRect().top-node.getBoundingClientRect().top-24; readingAnchor.current=null; },[messages]);
-  useEffect(()=>{const node=scroll.current;if(!node)return;setAway(node.scrollHeight-node.scrollTop-node.clientHeight>90);},[messages]);
+  useEffect(()=>{
+    const node=scroll.current,last=[...node?.querySelectorAll<HTMLElement>("[data-message-id]")??[]].at(-1);
+    if(!node||!last)return;
+    const observer=new IntersectionObserver(([entry])=>setAway(!entry.isIntersecting),{root:node,threshold:0.1});
+    observer.observe(last);
+    return()=>observer.disconnect();
+  },[messages]);
   useEffect(()=>{if(activeThreadId==="new")return;const controller=new AbortController();fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadId)}`,{signal:controller.signal}).then(async r=>{if(!r.ok)throw Error("Não foi possível carregar as propostas.");return r.json();}).then(data=>setProposals(data.proposals)).catch(()=>{});return()=>controller.abort();},[activeThreadId,proposalRefresh]);
   useEffect(() => {
     if (resumedOnOpen.current || initialGenerationId || currentThreadId === "new" || initialMessages.at(-1)?.role !== "ASSISTANT" || !initialMessages.at(-1)?.content.startsWith("Etapa de preparação salva.")) return;
