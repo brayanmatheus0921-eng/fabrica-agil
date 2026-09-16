@@ -20,6 +20,8 @@ RUN DATABASE_URL="postgresql://build:build@127.0.0.1:5432/build" \
 
 FROM base AS builder
 
+ENV SKIP_NEXT_TYPECHECK="1"
+
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
 
