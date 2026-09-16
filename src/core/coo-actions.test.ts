@@ -1,6 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { validateCooAction, approvalIntent, interviewResumeEligible } from "./coo-actions";
+import { validateCooAction, approvalIntent, interviewResumeEligible, assertCooWorkflow } from "./coo-actions";
+import { newWorkshop } from "./coo-workshop";
+
+test("execução permanece bloqueada até aprovação do plano completo",()=>{
+  const state=newWorkshop("diagnostic","Teste");
+  const action=validateCooAction({type:"task.status",taskId:"task",status:"DONE",report:"Conferi os cinco pedidos."});
+  assert.throws(()=>assertCooWorkflow(state,action),/Finalize e aprove/);
+  assert.doesNotThrow(()=>assertCooWorkflow({...state,stage:"FOLLOW_UP"},action));
+});
 test("retomada só segue aprovação preparatória sem resposta posterior nem duplicação",()=>{
   const approved={proposalId:"step-1",decision:"approve"};
   const measure={type:"workshop.patch",patch:{stage:"MEASURE"}};
@@ -9,7 +17,7 @@ test("retomada só segue aprovação preparatória sem resposta posterior nem du
   assert.equal(interviewResumeEligible(measure,"step-1",approved,true),false);
   assert.equal(interviewResumeEligible(measure,"step-1",{proposalId:"other",decision:"approve"},false),false);
   assert.equal(interviewResumeEligible(measure,"step-1",{proposalId:"step-1",decision:"reject"},false),false);
-  assert.equal(interviewResumeEligible({type:"workshop.patch",patch:{stage:"REVIEW"}},"step-1",approved,false),false);
+  assert.equal(interviewResumeEligible({type:"workshop.patch",patch:{stage:"REVIEW"}},"step-1",approved,false),true);
   assert.equal(interviewResumeEligible({type:"task.create"},"step-1",approved,false),false);
 });
 test("confirmação por texto é explícita; pedidos condicionais exigem nova proposta",()=>{

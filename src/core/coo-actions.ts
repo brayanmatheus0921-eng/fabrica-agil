@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { canvasSchema } from "./workspace-artifacts";
-import { executableWorkshopPatchSchema } from "./coo-workshop";
+import { executableWorkshopPatchSchema, type WorkshopState } from "./coo-workshop";
 import { productionEventSchema } from "./task-execution";
 
 const id = z.string().trim().min(1).max(200);
@@ -34,6 +34,11 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("company.update"), field: z.enum(["name", "sector", "productionType", "teamSize", "monthlyRevenueRange", "monthlyOrderVolume", "onTimeDeliveryRange", "reworkRange", "ownerDependency", "mainGoal", "biggestChallenge", "productionStages"]), value: z.string().trim().min(1).max(2000) }).strict(),
 ]);
 export type CooAction = z.infer<typeof actionSchema>;
+export function assertCooWorkflow(state:WorkshopState|null,action:CooAction){
+  if(action.type==="artifact.save" && !action.taskId)throw Error("Vincule a ferramenta a uma tarefa do plano aprovado.");
+  if(!state)return;
+  if(state.stage!=="FOLLOW_UP" && action.type!=="workshop.patch")throw Error("Finalize e aprove o plano completo antes de criar ferramentas ou iniciar a execução.");
+}
 export type CooActionResult = { message: string; href: string; artifactId?: string };
 export type CooProposalView = {
   id: string; threadId: string; sourceMessageId: string; summary: string; details: string[];
@@ -47,7 +52,7 @@ export function interviewResumeEligible(action: unknown, proposalId: string, lat
   const a = action as { type?: string; patch?: { stage?: string } };
   const approval = latestUserMetadata as { proposalId?: string; decision?: string };
   return approval.proposalId === proposalId && approval.decision === "approve" &&
-    (a.type === "workshop.start" || (a.type === "workshop.patch" && Boolean(a.patch?.stage) && a.patch?.stage !== "REVIEW"));
+    (a.type === "workshop.start" || (a.type === "workshop.patch" && Boolean(a.patch?.stage)));
 }
 
 export function validateCooAction(raw: unknown): CooAction {

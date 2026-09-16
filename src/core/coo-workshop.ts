@@ -24,6 +24,13 @@ export const workshopPatchSchema = z.object({
   confirmedFacts: z.array(z.object({ statement: z.string(), sourceMessageId: z.string() })).max(40),
   hypotheses: z.array(z.string()).max(20),
   decision: z.object({ primaryTitle: z.string().min(1), reason: z.string().min(1), basis: z.enum(["MATRIX", "NEW_EVIDENCE", "PREFERENCE"]), confirmedByMessageId: z.string() }).nullable(),
+  planningAgreement: z.object({
+    priority: z.object({ sourceMessageId: z.string(), excerpt: z.string().min(8) }),
+    ownership: z.object({ sourceMessageId: z.string(), excerpt: z.string().min(8) }),
+    deadline: z.object({ sourceMessageId: z.string(), excerpt: z.string().min(8) }),
+    capacity: z.object({ sourceMessageId: z.string(), excerpt: z.string().min(8) }),
+    resources: z.object({ sourceMessageId: z.string(), excerpt: z.string().min(8) }),
+  }).nullable().optional(),
   plan: cooPlanSchema.nullable(),
 });
 export const executableCooPlanSchema=cooPlanSchema.extend({initiatives:z.array(cooPlanSchema.shape.initiatives.element.extend({actions:z.array(cooActionSchema.extend({execution:executionGuideSchema})).min(1).max(3)})).min(1).max(5)});
@@ -46,8 +53,9 @@ export function readWorkshop(value: unknown): WorkshopState | null {
 export function newWorkshop(diagnosticId: string, diagnosticTitle: string): WorkshopState {
   return { skillVersion: 1, diagnosticId, diagnosticTitle, stage: "UNDERSTAND", revision: 0, furthestStage: 0, summary: "Aguardando confirmação do momento atual da fábrica.", confirmedFacts: [], hypotheses: [], decision: null, plan: null, planId: null, history: [] };
 }
-export function applyWorkshopPatch(current: WorkshopState, raw: unknown, userIds: string[], evidenceCodes: string[], methodCodes: string[]): WorkshopState {
+export function applyWorkshopPatch(current: WorkshopState, raw: unknown, userMessages: Array<{id:string;content:string}>, evidenceCodes: string[], methodCodes: string[]): WorkshopState {
   const patch = workshopPatchSchema.parse(raw);
+  const userIds=userMessages.map(message=>message.id);
   const nextIndex = WORKSHOP_STAGES.indexOf(patch.stage);
   if (patch.stage === "FOLLOW_UP" || current.stage === "FOLLOW_UP") throw new Error("O acompanhamento é liberado pela aprovação, não pelo COO.");
   if (nextIndex > WORKSHOP_STAGES.indexOf(current.stage) + 1 && patch.stage !== "REVIEW") throw new Error("Confirme a etapa atual antes de avançar.");
@@ -61,6 +69,13 @@ export function applyWorkshopPatch(current: WorkshopState, raw: unknown, userIds
     }
   }
   if (patch.stage === "REVIEW" && (!patch.plan || patch.plan.initiatives.length < 3 || !patch.decision || patch.plan.initiatives.find((item) => item.kind === "PRIMARY")?.title !== patch.decision.primaryTitle)) throw new Error("Confirme a iniciativa principal e complete 3 a 5 iniciativas antes da aprovação.");
+  if(patch.stage==="REVIEW"){
+    if(!patch.planningAgreement)throw new Error("Antes do plano final, confirme prioridade, responsáveis, prazo, capacidade e recursos com o gestor.");
+    for(const [category,source] of Object.entries(patch.planningAgreement)){
+      const message=userMessages.find(row=>row.id===source.sourceMessageId);
+      if(!message||!message.content.toLocaleLowerCase("pt-BR").includes(source.excerpt.trim().toLocaleLowerCase("pt-BR")))throw new Error(`Confirmação de ${category} sem trecho real da mensagem do gestor.`);
+    }
+  }
   return { ...current, ...patch, revision: current.revision + 1, furthestStage: Math.max(current.furthestStage, nextIndex), history: [...current.history, { revision: current.revision, stage: current.stage, summary: current.summary, at: new Date().toISOString() }] };
 }
 export function revisitWorkshop(current: WorkshopState, stage: WorkshopStage): WorkshopState {

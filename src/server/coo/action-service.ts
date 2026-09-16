@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { Prisma, CooActionProposal } from "@/generated/prisma/client";
-import { validateCooAction, taskStatusLabels, priorityLabels, projectStatusLabels, type CooAction, type CooProposalView, type CooActionResult } from "@/core/coo-actions";
+import { validateCooAction, assertCooWorkflow, taskStatusLabels, priorityLabels, projectStatusLabels, type CooAction, type CooProposalView, type CooActionResult } from "@/core/coo-actions";
 import { applyWorkshopPatch, readWorkshop, newWorkshop, STAGE_LABELS } from "@/core/coo-workshop";
 import { validateCanvas, type CanvasContent } from "@/core/workspace-artifacts";
 import { activateDraftPlan } from "@/server/plans/approve-plan";
@@ -27,7 +27,7 @@ function guidePreview(raw: unknown) {
 
 export function proposalView(row: CooActionProposal): CooProposalView {
   const action = object(row.action);
-  return { id: row.id, threadId: row.threadId, sourceMessageId: row.sourceMessageId, summary: row.summary, details: row.details as string[], status: row.status, createdAt: row.createdAt.toISOString(), resumeInterview: action.type === "workshop.start" || (action.type === "workshop.patch" && object(action.patch).stage !== "REVIEW"), ...(row.result ? { result: row.result as CooActionResult } : {}) };
+  return { id: row.id, threadId: row.threadId, sourceMessageId: row.sourceMessageId, summary: row.summary, details: row.details as string[], status: row.status, createdAt: row.createdAt.toISOString(), resumeInterview: action.type === "workshop.start" || action.type === "workshop.patch", ...(row.result ? { result: row.result as CooActionResult } : {}) };
 }
 
 async function authorize(db: DB, actor: ActionActor) {
@@ -38,6 +38,8 @@ async function authorize(db: DB, actor: ActionActor) {
 async function inspect(db: DB, actor: ActionActor, threadId: string, a: CooAction) {
   const companyId = actor.companyId;
   const thread = required(await db.conversationThread.findFirst({ where: { id: threadId, companyId } }), "Conversa");
+  const workflow=readWorkshop(thread.workflowState);
+  assertCooWorkflow(workflow,a);
   const plan = async (id: string, active = false) => {
     const row = required(await db.actionPlan.findFirst({ where: { id, companyId }, include: { tasks: { orderBy: { id: "asc" } } } }), "Projeto");
     if (active && row.status !== "ACTIVE") throw new Error("O projeto precisa estar ativo para essa ação.");
@@ -83,14 +85,16 @@ async function inspect(db: DB, actor: ActionActor, threadId: string, a: CooActio
     case "workshop.patch": {
       const state = required(readWorkshop(thread.workflowState), "Plano em construção");
       const diagnosis = required(await db.diagnosticSession.findFirst({ where: { id: state.diagnosticId, companyId, status: "COMPLETED" }, include: { answers: { include: { question: true } } } }), "Diagnóstico");
-      const messages = await db.conversationMessage.findMany({ where: { threadId, role: "USER" }, select: { id: true } });
+      const messages = await db.conversationMessage.findMany({ where: { threadId, role: "USER" }, select: { id: true, content: true } });
       const methods = await db.improvementMethod.findMany({ where: { status: "ACTIVE", versions: { some: { publishedAt: { not: null } } } }, select: { code: true } });
-      applyWorkshopPatch(state, a.patch, messages.map(m => m.id), diagnosis.answers.map(r => r.question.code), methods.map(m => m.code));
+      applyWorkshopPatch(state, a.patch, messages, diagnosis.answers.map(r => r.question.code), methods.map(m => m.code));
       return { ...revision, diagnosis, project: state.planId ? await plan(state.planId) : null };
     }
     case "artifact.save": {
       validateCanvas(a.content);
-      return { task: a.taskId ? await task(a.taskId) : null, artifact: a.replaceArtifactId ? required(await db.workspaceArtifact.findFirst({ where: { id: a.replaceArtifactId, companyId } }), "Arquivo") : null };
+      const destination=a.taskId?await task(a.taskId):null;
+      if(workflow?.planId && destination?.actionPlanId!==workflow.planId)throw Error("A ferramenta deve pertencer a uma tarefa deste plano.");
+      return { task: destination, artifact: a.replaceArtifactId ? required(await db.workspaceArtifact.findFirst({ where: { id: a.replaceArtifactId, companyId } }), "Arquivo") : null };
     }
     case "checkin.save": return { project: await plan(a.planId, true), checkin: a.checkinId ? required(await db.progressCheckin.findFirst({ where: { id: a.checkinId, companyId, actionPlanId: a.planId } }), "Acompanhamento") : null };
     case "evidence.correct": {

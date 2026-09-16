@@ -8,6 +8,7 @@ import { approvalIntent, type CooProposalView } from "@/core/coo-actions";
 import { AssistantComposer } from "@/components/assistant-composer";
 import { ArtifactWorkspace } from "@/components/artifact-workspace";
 import { AssistantMarkdown } from "@/components/assistant-markdown";
+import { notifyCompanyDataChanged } from "@/components/company-data-sync";
 import { STAGE_LABELS, WORKSHOP_STAGES, type WorkshopState, type WorkshopStage } from "@/core/coo-workshop";
 
 type Message = { id: string; role: string; content: string };
@@ -66,7 +67,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
   },[messages]);
   useEffect(()=>{if(activeThreadId==="new")return;const controller=new AbortController();fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadId)}`,{signal:controller.signal}).then(async r=>{if(!r.ok)throw Error("Não foi possível carregar as propostas.");return r.json();}).then(data=>setProposals(data.proposals)).catch(()=>{});return()=>controller.abort();},[activeThreadId,proposalRefresh]);
   useEffect(() => {
-    if (resumedOnOpen.current || initialGenerationId || currentThreadId === "new" || initialMessages.at(-1)?.role !== "ASSISTANT" || !initialMessages.at(-1)?.content.startsWith("Etapa de preparação salva.")) return;
+    if (resumedOnOpen.current || initialGenerationId || currentThreadId === "new" || initialMessages.at(-1)?.role !== "ASSISTANT" || !(/^(Etapa de preparação salva\.|Plano completo aprovado e tarefas liberadas\.)/.test(initialMessages.at(-1)?.content??""))) return;
     resumedOnOpen.current = true;
     fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(currentThreadId)}`).then(r=>r.json()).then(data=>{
       const proposal=(data.proposals as CooProposalView[]).findLast(p=>p.status==="APPLIED"&&p.resumeInterview);
@@ -92,7 +93,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
 
   async function resumeInterview(proposal:CooProposalView) {
     if (!proposal.resumeInterview || busyRef.current || disabled) return;
-    busyRef.current=true;setBusy(true);setActivity("Preparando a próxima pergunta do plano…");setNotice("");follow.current=false;
+    busyRef.current=true;setBusy(true);setActivity("Preparando o próximo passo…");setNotice("");follow.current=false;
     if(!readingAnchor.current)readingAnchor.current=proposal.sourceMessageId;
     const id=crypto.randomUUID(),assistantId=`assistant-resume-${proposal.id}`;
     requestId.current=id;pendingMessage.current="";
@@ -109,8 +110,8 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
           const event=JSON.parse(line);
           if(event.type==="activity")setActivity(event.text);
           if(event.type==="delta"){received+=event.text;setActivity("Respondendo…");flush();}
-          if(event.type==="done"){finished=true;setState(event.state);}
-          if(event.type==="error"||event.type==="stopped"){finished=true;received="";setMessages(old=>old.filter(m=>m.id!==assistantId));setNotice("A etapa foi salva. Peça ao COO para continuar o plano.");}
+          if(event.type==="done"){finished=true;setState(event.state);setProposalRefresh(v=>v+1);}
+          if(event.type==="error"||event.type==="stopped"){finished=true;received="";setMessages(old=>old.filter(m=>m.id!==assistantId));setNotice("A aprovação foi salva. Peça ao COO para continuar.");}
         }
       }
       if(!finished)throw Error("A conexão foi interrompida. Reabra a conversa para conferir a próxima pergunta.");
@@ -149,7 +150,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
           setMessages(old=>[...old,{id:approvalMessageId,role:"USER",content:text},{id:crypto.randomUUID(),role:"ASSISTANT",content:answer}]);
           const fresh = await fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadIdRef.current)}`).then(r=>r.json());
           setState(fresh.workshop); setProposalRefresh(v=>v+1);setCanvasRefresh(v=>v+1);router.refresh();
-          busyRef.current=false;setBusy(false);setActivity("");if(p.status==="APPLIED")await resumeInterview(p);return;
+          busyRef.current=false;setBusy(false);setActivity("");if(p.status==="APPLIED"){notifyCompanyDataChanged();await resumeInterview(p);}return;
         }
       } catch(e) {
         setNotice(e instanceof Error?e.message:"Não foi possível confirmar.");setDraft(text);busyRef.current=false;setBusy(false);setActivity("");return;
@@ -210,7 +211,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
   }
 
   const attachedSources=new Set(messages.filter((m,index)=>m.role==="USER"&&messages[index+1]?.role==="ASSISTANT").map(m=>m.id));
-  const onProposalApplied=(proposal:CooProposalView)=>{setNotice("Ação aplicada com sua aprovação.");setCanvasRefresh(v=>v+1);const approvalId=crypto.randomUUID();readingAnchor.current=approvalId;follow.current=false;setMessages(old=>[...old,{id:approvalId,role:"USER",content:`Aprovei: ${proposal.summary}`},{id:crypto.randomUUID(),role:"ASSISTANT",content:proposal.result?.message??"Ação aplicada."}]);router.refresh();fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadId)}`).then(r=>r.json()).then(data=>{if(data.workshop!==undefined)setState(data.workshop);}).catch(()=>{});void resumeInterview(proposal);};
+  const onProposalApplied=(proposal:CooProposalView)=>{notifyCompanyDataChanged();setNotice("Ação aplicada com sua aprovação.");setCanvasRefresh(v=>v+1);const approvalId=crypto.randomUUID();readingAnchor.current=approvalId;follow.current=false;setMessages(old=>[...old,{id:approvalId,role:"USER",content:`Aprovei: ${proposal.summary}`},{id:crypto.randomUUID(),role:"ASSISTANT",content:proposal.result?.message??"Ação aplicada."}]);router.refresh();fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadId)}`).then(r=>r.json()).then(data=>{if(data.workshop!==undefined)setState(data.workshop);}).catch(()=>{});void resumeInterview(proposal);};
   const onProposalChanged=(proposal:CooProposalView)=>setProposals(old=>old.map(p=>p.id===proposal.id?proposal:p));
   const onProposalAdjust=(text:string)=>{setDraft(text);document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Mensagem para o consultor"]')?.focus();};
 

@@ -22,7 +22,7 @@ export async function persistWorkshopPlan(tx: Prisma.TransactionClient, companyI
   await tx.actionPlan.upsert({ where: { id }, update: data, create: { id, companyId, status: "DRAFT", ...data } });
   await tx.task.deleteMany({ where: { actionPlanId: id, companyId } });
   await tx.task.createMany({ data: actions.map(({ initiative, action: a }, index) => ({
-    companyId, actionPlanId: id, title: a.what, status: "BACKLOG" as const, priority: initiative.kind === "PRIMARY" ? "HIGH" as const : "MEDIUM" as const, sortOrder: index + 1,
+    companyId, actionPlanId: id, title: a.what, ownerName: a.who, status: "BACKLOG" as const, priority: initiative.kind === "PRIMARY" ? "HIGH" as const : "MEDIUM" as const, sortOrder: index + 1,
     description: `${initiative.title}\nPor quê: ${a.why}\nQuem: ${a.who}\nOnde: ${a.where}\nComo: ${a.how}\nCusto: ${a.howMuch}\nPrazo sugerido: ${a.whenDays} dias após aprovação\nIndicador: ${a.indicator}\nPonto de partida: ${a.baseline}\nMeta: ${a.target}\nRevisão: ${a.reviewCadence}`,
     expectedOutput: a.proof, executionGuide: a.execution as never,
   })) });
