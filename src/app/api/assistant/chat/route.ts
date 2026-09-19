@@ -18,7 +18,7 @@ import { canvasSchema, validateCanvas } from "@/core/workspace-artifacts";
 import { CANVAS_INSTRUCTIONS } from "@/server/ai/artifact-agent";
 import { taskProgress } from "@/core/task-progress";
 import { findReusableCanvas } from "@/server/artifact-deduplication";
-import { resolveCooMode } from "@/core/coo-mode";
+import { cooModeAllowsOperationalTools, resolveCooMode } from "@/core/coo-mode";
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
@@ -115,8 +115,10 @@ export async function POST(request: Request) {
         }});
         const interviewing=mode==="PLANNING";
         const planLocked=mode==="PLAN_REQUIRED";
-        const agent = new Agent({ name: "COO Fábrica Ágil", model: env.OPENAI_MODEL ?? "gpt-5.6-luna", tools: (resumeProposalId&&!resumeExecution) || interviewing || planLocked ? [consult] : [consult, propose, createCanvas],
-          instructions: `${modeSkill}\n\nMODO DEFINIDO PELO SERVIDOR: ${mode}. Não troque de modo.\n${interviewing ? `${planningSkill}\n${WORKSHOP_AGENT_INSTRUCTIONS}` : `${INDUSTRIAL_CONSULTANT_INSTRUCTIONS}\n${COO_ACTION_INSTRUCTIONS}`}${planLocked ? `\nExiste diagnóstico concluído, mas não há plano aprovado nesta empresa. Não proponha tarefas, projetos, ferramentas ou execução. Oriente o gestor a abrir [o resultado do diagnóstico](/diagnostico?id=${context.diagnostic?.id ?? ""}#proximo-passo) e clicar em Montar plano com o COO.` : ""}${resumeExecution ? "\nO plano completo acabou de ser aprovado pela plataforma. Consulte suas tarefas e formulários. Explique o primeiro passo com link para a tarefa. Se houver necessidade de documento ou planilha complementar ainda inexistente, prepare uma proposta de ferramenta vinculada a essa tarefa para aprovação; não execute nada. Não recrie formulários que já estão no guia. Não pergunte de novo os acordos já confirmados." : resumeProposalId ? "\nEsta resposta retoma a conversa imediatamente após a aprovação de uma etapa preparatória. Não há nova resposta do gestor. Explique em uma frase o que foi salvo e faça uma pergunta concreta sobre o próximo dado indispensável para construir um plano completo com 3 a 5 iniciativas e 5W2H. Não valide hipóteses por aprovação de etapa. Não proponha nem execute ações neste turno. Uma medição ausente pode entrar como primeira iniciativa; não deixe a entrevista parada esperando uma semana de dados." : ""}`,
+        const planComplete=mode==="PLAN_COMPLETE";
+        const operationalTools=cooModeAllowsOperationalTools(mode);
+        const agent = new Agent({ name: "COO Fábrica Ágil", model: env.OPENAI_MODEL ?? "gpt-5.6-luna", tools: operationalTools && !(resumeProposalId&&!resumeExecution) ? [consult, propose, createCanvas] : [consult],
+          instructions: `${modeSkill}\n\nMODO DEFINIDO PELO SERVIDOR: ${mode}. Não troque de modo.\n${interviewing ? `${planningSkill}\n${WORKSHOP_AGENT_INSTRUCTIONS}` : `${INDUSTRIAL_CONSULTANT_INSTRUCTIONS}\n${COO_ACTION_INSTRUCTIONS}`}${planLocked ? `\nExiste diagnóstico concluído, mas não há plano aprovado nesta empresa. Não proponha tarefas, projetos, ferramentas ou execução. Oriente o gestor a abrir [o resultado do diagnóstico](/diagnostico?id=${context.diagnostic?.id ?? ""}#proximo-passo) e clicar em Montar plano com o COO.` : ""}${planComplete ? "\nEsta é a conversa fechada de planejamento. O plano já foi aprovado. Informe o link do plano e direcione qualquer execução ou acompanhamento para [o chat geral do COO](/assistente). Não proponha alterações aqui." : ""}${resumeExecution ? "\nO plano completo acabou de ser aprovado pela plataforma. Confirme em uma frase e mostre o link do plano e do chat geral do COO. Não proponha outra ação nesta conversa de planejamento." : resumeProposalId ? "\nEsta resposta retoma a conversa imediatamente após a aprovação de uma etapa preparatória. Não há nova resposta do gestor. Explique em uma frase o que foi salvo e faça uma pergunta concreta sobre o próximo dado indispensável para construir um plano completo com 3 a 5 iniciativas e 5W2H. Não valide hipóteses por aprovação de etapa. Não proponha nem execute ações neste turno. Uma medição ausente pode entrar como primeira iniciativa; não deixe a entrevista parada esperando uma semana de dados." : ""}`,
         });
         // Selected diagnosis is authoritative; historical model prose is not matrix evidence.
         const snapshot = diagnosis?.resultSnapshot && typeof diagnosis.resultSnapshot === "object" ? { ...diagnosis.resultSnapshot as object } as Record<string, unknown> : null;
@@ -152,13 +154,18 @@ export async function POST(request: Request) {
           }
           emit({type:"delta",text});
         }else{
-        const result = await run(agent, input, { stream: true, signal: controller.signal, maxTurns: 8 });
-        for await (const chunk of result.toTextStream()) {
-          if (controller.signal.aborted) throw new Error("Resposta interrompida");
-          text += chunk;
-          emit({ type: "delta", text: chunk });
+        let correction="";
+        for(let attempt=0;attempt<3;attempt++){
+          actionDraft=null;
+          const result=await run(agent,input+correction,{signal:controller.signal,maxTurns:8});
+          const candidate=String(result.finalOutput??"").trim();
+          const asksBareApproval=/\bposso\b[^?]{0,180}\?\s*$/i.test(candidate)&&!actionDraft;
+          if(!asksBareApproval){text=candidate;break;}
+          if(attempt===2)throw new Error("O COO não conseguiu preparar uma proposta segura.");
+          correction="\nSua resposta anterior pediu autorização sem criar o cartão. Consulte o ID real já presente em context.activePlan e chame a ferramenta de proposta nesta resposta. Não termine com 'Posso...?' sem uma proposta validada.";
+          emit({type:"activity",text:"Preparando a alteração para sua aprovação…"});
         }
-        await result.completed;
+        emit({type:"delta",text});
         }
         if (controller.signal.aborted || !text.trim()) throw new Error("Resposta interrompida ou vazia");
         const saved = await prisma.$transaction(async tx => {

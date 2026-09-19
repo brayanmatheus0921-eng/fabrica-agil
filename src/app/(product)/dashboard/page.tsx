@@ -5,6 +5,7 @@ import { ReadingDetails } from "@/components/reading-layout";
 import { cooPlanSchema } from "@/core/coo-workshop";
 import { readWorkshop } from "@/core/coo-workshop";
 import { resolveCompanyJourney } from "@/core/company-journey";
+import { isDedicatedPlanThread } from "@/core/plan-thread";
 import { GeneratePlanButton } from "@/app/(product)/diagnostico/generate-plan-button";
 import {
   ArrowRight,
@@ -109,7 +110,7 @@ export default async function DashboardPage() {
 
   const parsedPlan = cooPlanSchema.safeParse(activePlan?.targetOutcome);
   const primaryInitiative = parsedPlan.success ? parsedPlan.data.initiatives.find(item => item.kind === "PRIMARY") : null;
-  const workshop = workflowThreads.map((thread) => ({ threadId: thread.id, state: readWorkshop(thread.workflowState) })).find((item) => item.state && item.state.diagnosticId === diagnostic?.id && item.state.stage !== "FOLLOW_UP") ?? null;
+  const workshop = workflowThreads.map((thread) => ({ threadId: thread.id, state: readWorkshop(thread.workflowState) })).find((item) => isDedicatedPlanThread(item.threadId) && item.state && item.state.diagnosticId === diagnostic?.id && item.state.stage !== "FOLLOW_UP") ?? null;
   const nextStep = resolveCompanyJourney({ onboardingComplete, profileComplete, diagnosticId: diagnostic?.id ?? null, workshop: workshop?.state ? { threadId: workshop.threadId, stage: workshop.state.stage } : null, activePlan: activePlan ? { id: activePlan.id, nextTaskId: nextTask?.id ?? null, taskCount, completedTasks } : null });
 
   const journey = [

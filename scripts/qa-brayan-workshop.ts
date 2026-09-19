@@ -8,6 +8,7 @@ import { AUTH_COOKIE_NAME } from "../src/core/auth-config";
 import { newWorkshop, readWorkshop } from "../src/core/coo-workshop";
 import { readExecutionGuide } from "../src/core/task-execution";
 import { taskProgress } from "../src/core/task-progress";
+import { planThreadId } from "../src/core/plan-thread";
 
 loadEnvFile(".env.local");
 loadEnvFile(".env");
@@ -27,11 +28,13 @@ async function main(){
   const token=randomBytes(32).toString("base64url");
   const session=await db.authSession.create({data:{userId:brayan.id,tokenHash:sessionTokenHash(token,config!),expiresAt:new Date(Date.now()+3600_000)}});
   const diagnosis=await db.diagnosticSession.create({data:{companyId,templateId:template.id,status:"COMPLETED",title:`QA retrabalho ${runId}`,completedAt:new Date(),resultSummary:"Diagnóstico sintético para testar entrevista; não representa dados da fábrica.",resultSnapshot:{source:"QA_SYNTHETIC",themes:[{themeCode:"REWORK",priorityOrder:1,answers:[{questionCode:template.questions[0].code}]}]},answers:{create:[{questionId:template.questions[0].id,value:"QA sintético: dificuldades de conferência",notes:"Exclusivamente teste técnico"}]}}});
-  const thread=await db.conversationThread.create({data:{companyId,title:`QA entrevista COO ${runId}`,workflowState:newWorkshop(diagnosis.id,diagnosis.title!) as never}});
+  const thread=await db.conversationThread.create({data:{id:planThreadId(diagnosis.id),companyId,title:`QA plano de ação ${runId}`,workflowState:newWorkshop(diagnosis.id,diagnosis.title!) as never}});
+  let activeThreadId=thread.id;
+  let executionThreadId:string|null=null;
   const headers={"Content-Type":"application/json","Origin":base,"Cookie":`${AUTH_COOKIE_NAME}=${token}`};
   try{
     async function chat(message:string){
-      const response=await fetch(`${base}/api/assistant/chat`,{method:"POST",headers,body:JSON.stringify({threadId:thread.id,requestId:randomUUID(),message}),signal:AbortSignal.timeout(175000)});
+      const response=await fetch(`${base}/api/assistant/chat`,{method:"POST",headers,body:JSON.stringify({threadId:activeThreadId,requestId:randomUUID(),message}),signal:AbortSignal.timeout(175000)});
       assert.equal(response.status,200,"chat deve aceitar mensagem do Brayan");
       const events=(await response.text()).trim().split("\n").filter(Boolean).map(line=>JSON.parse(line));
       const errors=events.filter(event=>["error","stopped"].includes(event.type));
@@ -80,8 +83,10 @@ async function main(){
     console.log("PASS retomada após aprovação final, sem mensagem falsa ou duplicação.");
     await decide(final.proposal.id);
     assert.equal(await db.task.count({where:{actionPlanId:plan.id}}),plan.tasks.length,"aprovação repetida não duplica tarefas");
+    const executionThread=await db.conversationThread.create({data:{companyId,title:`QA execução COO ${runId}`}});
+    executionThreadId=executionThread.id;activeThreadId=executionThread.id;
     const revisionBefore=await fetch(`${base}/api/company/revision`,{headers}).then(r=>r.json());
-    const measure=plan.tasks.find(task=>readExecutionGuide(task.executionGuide)?.recording?.kind==="FORM");
+    const measure=plan.tasks.find(task=>["TODO","IN_PROGRESS"].includes(task.status)&&readExecutionGuide(task.executionGuide)?.recording?.kind==="FORM");
     assert.ok(measure,"medição deve ter formulário executável");
     const guide=readExecutionGuide(measure.executionGuide)!;
     const values=Object.fromEntries(guide.recording!.fields.map(field=>[field.key,field.type==="NUMBER"?"2":"Pedido QA001: erro de medida no desenho detectado antes da produção"]));
@@ -101,17 +106,18 @@ async function main(){
     const freshTasks=await db.task.findMany({where:{actionPlanId:plan.id},include:{evidence:true}});
     const progress=taskProgress(freshTasks,[]);
     assert.equal(progress.completed,1);assert.equal(progress.results.length,1);assert.equal(progress.recordCount,1);
-    const tool=await chat(`Agora crie um documento checklist de conferência de medidas ligado à tarefa "${measure.title}" deste plano aprovado. Inclua conferir pedido, comparar cotas e registrar divergências; sem dados reais preenchidos. Prepare a proposta para minha aprovação.`);
+    const toolTask=plan.tasks.find(task=>task.id!==measure.id)!;
+    const tool=await chat(`Agora crie um documento checklist de conferência de medidas ligado à tarefa "${toolTask.title}" deste plano aprovado. Inclua conferir pedido, comparar cotas e registrar divergências; sem dados reais preenchidos. Prepare a proposta para minha aprovação.`);
     assert.ok(tool.proposal);
     const toolAction=Object((await db.cooActionProposal.findUniqueOrThrow({where:{id:tool.proposal.id}})).action);
-    assert.equal(toolAction.type,"artifact.save");assert.equal(toolAction.taskId,measure.id);
+    assert.equal(toolAction.type,"artifact.save");assert.equal(toolAction.taskId,toolTask.id);
     await decide(tool.proposal.id);
-    assert.equal(await db.workspaceArtifact.count({where:{threadId:thread.id,taskId:measure.id}}),1);
+    assert.equal(await db.workspaceArtifact.count({where:{threadId:executionThread.id,taskId:toolTask.id}}),1);
     const note=await chat(`Na tarefa "${measure.title}" registre a observação "A próxima revisão de resultados será discutida na reunião semanal". Prepare para eu aprovar.`);
     assert.ok(note.proposal);await decide(note.proposal.id,"reject");
     assert.equal((await decide(note.proposal.id)).status,"REJECTED","recusa não pode virar aprovação");
     assert.equal(await db.evidenceOutput.count({where:{taskId:measure.id}}),2);
-    for(const page of ["/tarefas",`/tarefas/${measure.id}`,`/plano-de-acao?id=${plan.id}`,`/acompanhamento?project=${plan.id}`,`/assistente?chat=${thread.id}`]){
+    for(const page of ["/tarefas",`/tarefas/${measure.id}`,`/plano-de-acao?id=${plan.id}`,`/acompanhamento?project=${plan.id}`,`/assistente?chat=${executionThread.id}`]){
       const response=await fetch(base+page,{headers,redirect:"manual"});assert.equal(response.status,200,page);
       const html=await response.text();assert.ok(!html.includes("Application error"),page);
       if(page.startsWith("/acompanhamento")){assert.ok(html.includes("Concluída"));assert.ok(html.includes("cinco pedidos"));}
@@ -123,13 +129,14 @@ async function main(){
     const tasks=await db.task.findMany({where:{companyId,actionPlanId:{in:planIds}},select:{id:true}});
     const checkins=await db.progressCheckin.findMany({where:{companyId,actionPlanId:{in:planIds}},select:{id:true}});
     await db.evidenceOutput.deleteMany({where:{companyId,OR:[{taskId:{in:tasks.map(task=>task.id)}},{checkinId:{in:checkins.map(checkin=>checkin.id)}}]}});
-    await db.workspaceArtifact.deleteMany({where:{companyId,threadId:thread.id}});
+    const threadIds=[thread.id,...(executionThreadId?[executionThreadId]:[])];
+    await db.workspaceArtifact.deleteMany({where:{companyId,threadId:{in:threadIds}}});
     await db.progressCheckin.deleteMany({where:{companyId,actionPlanId:{in:planIds}}});
     await db.task.deleteMany({where:{companyId,actionPlanId:{in:planIds}}});
     await db.actionPlan.deleteMany({where:{companyId,id:{in:planIds}}});
-    await db.cooActionProposal.deleteMany({where:{companyId,threadId:thread.id}});
-    await db.conversationMessage.deleteMany({where:{threadId:thread.id}});
-    await db.conversationThread.delete({where:{id:thread.id}});
+    await db.cooActionProposal.deleteMany({where:{companyId,threadId:{in:threadIds}}});
+    await db.conversationMessage.deleteMany({where:{threadId:{in:threadIds}}});
+    await db.conversationThread.deleteMany({where:{id:{in:threadIds}}});
     await db.diagnosticSession.delete({where:{id:diagnosis.id}});
     await db.authSession.delete({where:{id:session.id}});
     console.log("QA temporal da conta Brayan removido.");
