@@ -129,7 +129,7 @@ export async function loadCompanyContext(companyId: string) {
       actionPlans: {
         where: { status: "ACTIVE" },
         orderBy: { createdAt: "desc" },
-        take: 1,
+        take: 20,
         select: {
           id: true,
           title: true,
@@ -221,7 +221,7 @@ export async function loadCompanyContext(companyId: string) {
     company.diagnostics.find((item) => item.status === "COMPLETED") ??
     company.diagnostics[0] ??
     null;
-  const activePlan = company.actionPlans[0] ?? null;
+  const activePlan = company.actionPlans.find(item => asRecord(item.baseline).source !== "COO_AD_HOC") ?? null;
   const onboardingData =
     company.onboardingData &&
     typeof company.onboardingData === "object" &&

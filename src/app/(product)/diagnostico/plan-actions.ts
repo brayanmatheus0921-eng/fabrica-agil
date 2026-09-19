@@ -23,5 +23,5 @@ export async function generateDiagnosticPlan(_state: { error: string | null }, f
     workflowState: newWorkshop(diagnosis.id, diagnosis.title ?? "Diagnóstico operacional") as never,
     messages: { create: { role: "ASSISTANT", content: introduction } },
   } });
-  redirect(`/assistente?chat=${id}`);
+  redirect(`/plano-de-acao/construir?chat=${id}`);
 }

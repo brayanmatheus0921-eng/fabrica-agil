@@ -42,3 +42,12 @@ test("datas inválidas e equipe incoerente são rejeitadas",()=>{
   assert.throws(()=>validateCooAction({type:"company.update",field:"teamSize",value:"0"}));
   assert.equal(validateCooAction({type:"task.update",taskId:"task",dueDate:"2026-09-12",priority:"URGENT"}).type,"task.update");
 });
+test("tarefa distingue vínculo com o plano de demanda avulsa",()=>{
+  const common={type:"task.create",title:"Conferir pedido",description:"Conferir medidas antes do corte",ownerName:null,dueDate:null,priority:"MEDIUM"};
+  const planned=validateCooAction({...common,scope:"PLAN",planId:"plano-1"});
+  const adHoc=validateCooAction({...common,scope:"AD_HOC",planId:null});
+  assert.equal(planned.type,"task.create"); if(planned.type==="task.create")assert.equal(planned.scope,"PLAN");
+  assert.equal(adHoc.type,"task.create"); if(adHoc.type==="task.create")assert.equal(adHoc.scope,"AD_HOC");
+  assert.throws(()=>validateCooAction({...common,scope:"PLAN",planId:null}),/Escolha o plano/);
+  assert.throws(()=>validateCooAction({...common,scope:"AD_HOC",planId:"plano-1"}),/não pode ser vinculada/);
+});

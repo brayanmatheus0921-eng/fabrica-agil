@@ -9,6 +9,7 @@ import { persistWorkshopPlan } from "@/server/ai/workshop-persistence";
 import { readExecutionGuide, validateFormValues, validateProductionEvent } from "@/core/task-execution";
 import { readRecords, eventsFrom } from "@/core/task-records";
 import { assertApprovedPlanForAction } from "@/core/coo-mode";
+import { isDedicatedPlanThread } from "@/core/plan-thread";
 
 type DB = Prisma.TransactionClient;
 export type ActionActor = { companyId: string; userId: string; membershipId: string };
@@ -64,7 +65,11 @@ async function inspect(db: DB, actor: ActionActor, threadId: string, a: CooActio
       if (a.status === "COMPLETED" && project.tasks.some(t => !["DONE", "CANCELLED"].includes(t.status))) throw new Error("Há tarefas pendentes. Conclua ou cancele cada uma antes de concluir o projeto.");
       return { project };
     }
-    case "task.create": return { project: await plan(a.planId, true) };
+    case "task.create": {
+      if (a.scope === "PLAN") return { project: await plan(a.planId!, true), taskScope: "PLAN" };
+      const candidates = await db.actionPlan.findMany({ where: { companyId, status: "ACTIVE" }, include: { tasks: { orderBy: { id: "asc" } } } });
+      return { project: candidates.find(item => object(item.baseline).source === "COO_AD_HOC") ?? null, taskScope: "AD_HOC" };
+    }
     case "task.update": return { task: await task(a.taskId), ...(a.planId ? { destination: await plan(a.planId, true) } : {}) };
     case "task.status": case "task.note": return { task: await task(a.taskId) };
     case "task.record": {
@@ -83,6 +88,7 @@ async function inspect(db: DB, actor: ActionActor, threadId: string, a: CooActio
       return { project, sourceThread: typeof source === "string" ? await db.conversationThread.findFirst({ where: { id: source, companyId }, select: { id: true, workflowState: true } }) : null };
     }
     case "workshop.start": {
+      if (!isDedicatedPlanThread(threadId)) throw new Error("Inicie o plano pela aba Plano de ação.");
       if (readWorkshop(thread.workflowState)) throw new Error("Esta conversa já tem um diagnóstico vinculado. Abra uma nova conversa para outro ciclo.");
       const diagnosis = required(await db.diagnosticSession.findFirst({ where: { id: a.diagnosticId, companyId, status: "COMPLETED" } }), "Diagnóstico preenchido");
       return { ...revision, diagnosis };
@@ -116,12 +122,13 @@ async function inspect(db: DB, actor: ActionActor, threadId: string, a: CooActio
 
 function preview(a: CooAction, snapshot: unknown): { summary: string; details: string[] } {
   const s = object(snapshot), p = object(s.project), t = object(s.task);
-  const target = t.title ? [`Tarefa: ${t.title}`, `Projeto: ${object(t.actionPlan).title}`] : p.title ? [`Projeto: ${p.title}`] : [];
+  const planLabel = object(p.baseline).source === "COO_COLLABORATIVE" ? "Plano" : "Projeto";
+  const target = t.title ? [`Tarefa: ${t.title}`, `Destino: ${object(t.actionPlan).title}`] : p.title ? [`${planLabel}: ${p.title}`] : [];
   const changes = (fields: Record<string, unknown>, original: Record<string, unknown>, labels: Record<string, string>) => Object.entries(fields).filter(([k]) => labels[k]).map(([k, v]) => `${labels[k]}: ${display(original[k])} → ${display(v)}`);
   switch (a.type) {
     case "project.create": return { summary: `Posso criar o projeto “${a.title}”?`, details: [`Objetivo: ${a.objective}`, `Prazo: ${a.horizonDays} dias após aprovação`, ...(Array.isArray(s.existing) && s.existing.length ? ["Atenção: já existe projeto com esse nome. Esta ação criará outro projeto."] : [])] };
-    case "project.update": return { summary: `Posso atualizar o projeto “${p.title}”?`, details: [...target, ...changes({ title: a.title, objective: a.goal, windowDays: a.horizonDays, status: a.status ? projectStatusLabels[a.status] : undefined }, { ...p, status: projectStatusLabels[p.status as keyof typeof projectStatusLabels] }, { title: "Nome", objective: "Objetivo", windowDays: "Prazo em dias", status: "Situação" }).filter(line => !line.endsWith("→ Não informado"))] };
-    case "task.create": return { summary: `Posso criar a tarefa “${a.title}”?`, details: [...target, `Descrição: ${display(a.description)}`, `Responsável: ${display(a.ownerName)}`, `Prazo: ${dateLabel(dueDate(a.dueDate))}`, `Prioridade: ${priorityLabels[a.priority]}`, ...(Array.isArray(p.tasks) && p.tasks.some(x => String(object(x).title).toLowerCase() === a.title.toLowerCase()) ? ["Atenção: já existe tarefa com esse nome neste projeto."] : [])] };
+    case "project.update": return { summary: `Posso atualizar ${planLabel === "Plano" ? "o plano" : "o projeto"} “${p.title}”?`, details: [...target, ...changes({ title: a.title, objective: a.goal, windowDays: a.horizonDays, status: a.status ? projectStatusLabels[a.status] : undefined }, { ...p, status: projectStatusLabels[p.status as keyof typeof projectStatusLabels] }, { title: "Nome", objective: "Objetivo", windowDays: "Prazo em dias", status: "Situação" }).filter(line => !line.endsWith("→ Não informado"))] };
+    case "task.create": return { summary: `Posso criar a tarefa “${a.title}”?`, details: [a.scope === "PLAN" ? `Origem: plano “${p.title}”` : "Origem: demanda avulsa, fora do plano de ação", `Descrição: ${display(a.description)}`, `Responsável: ${display(a.ownerName)}`, `Prazo: ${dateLabel(dueDate(a.dueDate))}`, `Prioridade: ${priorityLabels[a.priority]}`, ...(Array.isArray(p.tasks) && p.tasks.some(x => String(object(x).title).toLowerCase() === a.title.toLowerCase()) ? ["Atenção: já existe tarefa com esse nome neste destino."] : [])] };
     case "task.update": return { summary: `Posso atualizar a tarefa “${t.title}”?`, details: [...target, ...changes(Object.fromEntries(Object.entries(a).filter(([,v]) => v !== undefined)), t, { title: "Nome", description: "Descrição", ownerName: "Responsável", expectedOutput: "Entrega esperada" }), ...(a.dueDate !== undefined ? [`Prazo: ${dateLabel(t.dueAt)} → ${dateLabel(dueDate(a.dueDate))}`] : []), ...(a.priority ? [`Prioridade: ${priorityLabels[t.priority as keyof typeof priorityLabels]} → ${priorityLabels[a.priority]}`] : []), ...(a.planId ? [`Mover para: ${object(s.destination).title}`] : [])] };
     case "task.status": return { summary: `Posso marcar “${t.title}” como ${taskStatusLabels[a.status].toLowerCase()}?`, details: [...target, `Situação: ${taskStatusLabels[t.status as keyof typeof taskStatusLabels]} → ${taskStatusLabels[a.status]}`, ...(a.report ? [`Relato do gestor: ${a.report}`] : [])] };
     case "task.note": return { summary: `Posso registrar esta informação em “${t.title}”?`, details: [...target, `Tipo: ${{CONTEXT:"Contexto",APPLIED:"Execução",RESULT:"Resultado",BLOCKER:"Bloqueio"}[a.category]}`, `Relato do gestor: ${a.text}`] };
@@ -175,8 +182,14 @@ async function apply(db: DB, actor: ActionActor, proposal: CooActionProposal, a:
       return { message: "Projeto atualizado.", href: `/tarefas?project=${a.planId}` };
     }
     case "task.create": {
-      const tasks = project.tasks as Array<{sortOrder:number}>;
-      const t = await db.task.create({ data: { companyId, actionPlanId: a.planId, title: a.title, description: a.description, ownerName: a.ownerName, dueAt: dueDate(a.dueDate), priority: a.priority, status: "TODO", startsAt: now, sortOrder: Math.max(0, ...tasks.map(t => t.sortOrder)) + 1 } });
+      const destination = a.scope === "PLAN" ? project : await db.actionPlan.upsert({
+        where: { id: `coo-adhoc-${companyId}` },
+        update: { status: "ACTIVE" },
+        create: { id: `coo-adhoc-${companyId}`, companyId, title: "Demandas avulsas", objective: "Organizar solicitações operacionais que não fazem parte do plano de ação.", windowDays: 30, status: "ACTIVE", startsAt: now, baseline: { source: "COO_AD_HOC", createdBy: "COO_APPROVED" }, targetOutcome: { source: "COO_AD_HOC" } },
+        include: { tasks: true },
+      });
+      const tasks = (destination.tasks ?? []) as Array<{sortOrder:number}>;
+      const t = await db.task.create({ data: { companyId, actionPlanId: String(destination.id), title: a.title, description: a.description, ownerName: a.ownerName, dueAt: dueDate(a.dueDate), priority: a.priority, status: "TODO", startsAt: now, sortOrder: Math.max(0, ...tasks.map(t => t.sortOrder)) + 1 } });
       return { message: "Tarefa criada.", href: `/tarefas/${t.id}` };
     }
     case "task.update": {
@@ -201,7 +214,7 @@ async function apply(db: DB, actor: ActionActor, proposal: CooActionProposal, a:
       return {message:a.intent==="UNDO"?"Último registro desfeito; histórico preservado.":"Registro preenchido.",href:`/tarefas/${a.taskId}`};
     }
     case "plan.approve": if (!await activateDraftPlan(db, companyId, a.planId)) throw new Error("O plano mudou ou está sendo revisado. Solicite uma nova proposta."); return { message: "Plano aprovado e tarefas liberadas.", href: `/plano-de-acao?id=${a.planId}` };
-    case "workshop.start": await db.conversationThread.update({ where: { id: threadId }, data: { workflowState: json(newWorkshop(a.diagnosticId, String(object(s.diagnosis).title ?? "Diagnóstico"))) } }); return { message: "Diagnóstico selecionado. Podemos construir o plano nesta conversa.", href: `/assistente?chat=${threadId}` };
+    case "workshop.start": await db.conversationThread.update({ where: { id: threadId }, data: { workflowState: json(newWorkshop(a.diagnosticId, String(object(s.diagnosis).title ?? "Diagnóstico"))) } }); return { message: "Diagnóstico selecionado. Podemos construir o plano nesta conversa.", href: `/plano-de-acao/construir?chat=${threadId}` };
     case "workshop.patch": {
       const thread = await db.conversationThread.findUniqueOrThrow({ where: { id: threadId } });
       const current = required(readWorkshop(thread.workflowState), "Plano em construção");
@@ -212,7 +225,7 @@ async function apply(db: DB, actor: ActionActor, proposal: CooActionProposal, a:
         if (!state.planId || !await activateDraftPlan(db, companyId, state.planId)) throw new Error("Não foi possível iniciar o plano completo. Revise a proposta.");
         return { message: "Plano completo aprovado e tarefas liberadas.", href: `/plano-de-acao?id=${state.planId}` };
       }
-      return { message: "Etapa de preparação salva. Ainda faltam o plano completo e sua aprovação.", href: `/assistente?chat=${threadId}` };
+      return { message: "Etapa de preparação salva. Ainda faltam o plano completo e sua aprovação.", href: `/plano-de-acao/construir?chat=${threadId}` };
     }
     case "artifact.save": {
       const content = validateCanvas(a.content);

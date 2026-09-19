@@ -5,8 +5,12 @@ import { resolveCompanyJourney } from "./company-journey";
 const base = { onboardingComplete: true, profileComplete: true, diagnosticId: "diagnostico", workshop: null, activePlan: null };
 
 test("jornada leva do diagnóstico concluído ao plano, nunca a uma tarefa solta", () => {
-  assert.equal(resolveCompanyJourney(base).kind, "RESULT");
-  assert.equal(resolveCompanyJourney({ ...base, workshop: { threadId: "chat", stage: "CAUSES" } }).kind, "PLANNING");
+  const result=resolveCompanyJourney(base);
+  const planning=resolveCompanyJourney({ ...base, workshop: { threadId: "chat", stage: "CAUSES" } });
+  assert.equal(result.kind, "RESULT");
+  assert.equal(result.href, "/plano-de-acao");
+  assert.equal(planning.kind, "PLANNING");
+  assert.equal(planning.href, "/plano-de-acao/construir?chat=chat");
 });
 
 test("jornada só libera execução quando existe plano ativo", () => {

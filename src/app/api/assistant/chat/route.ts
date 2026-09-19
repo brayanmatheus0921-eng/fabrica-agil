@@ -23,6 +23,8 @@ import { cooModeAllowsOperationalTools, resolveCooMode } from "@/core/coo-mode";
 export const runtime = "nodejs";
 export const maxDuration = 180;
 const inputSchema = z.object({ threadId: z.string().min(1).max(200), requestId: z.string().uuid(), message: z.string().trim().min(1).max(6000).optional(), resumeProposalId: z.string().min(1).max(200).optional() }).strict().refine(value => Boolean(value.message) !== Boolean(value.resumeProposalId));
+const asksToCreateTask = (value: string) => /(?:\b(?:adicion|cri|inclu|registr)\w*\b[^.?!]{0,100}\btarefa\b|\btarefa\b[^.?!]{0,100}\b(?:adicion|cri|inclu|registr)\w*\b)/i.test(value);
+const declaresTaskScope = (value: string) => /\b(?:avuls\w*|fora\s+do\s+plano|plano\s+atual|faz\s+parte\s+do\s+plano|iniciativa\s+do\s+plano)\b/i.test(value);
 
 export async function POST(request: Request) {
   const auth = await requireAuth();
@@ -89,7 +91,7 @@ export async function POST(request: Request) {
         const diagnosis = current ? await prisma.diagnosticSession.findFirst({ where: { id: current.diagnosticId, companyId: auth.companyId, status: "COMPLETED" }, include: { answers: { include: { question: true } } } }) : null;
         if (current && !diagnosis) throw new Error("Diagnóstico indisponível");
         const selectedPlan = current?.planId ? await prisma.actionPlan.findFirst({ where: { id: current.planId, companyId: auth.companyId }, include: { tasks: { include: { evidence: { orderBy: { createdAt: "desc" }, take: 100 } } }, checkins: { orderBy: { createdAt: "desc" }, take: 5 } } }) : null;
-        const progressPlan = selectedPlan ?? (!current ? await prisma.actionPlan.findFirst({ where: { companyId: auth.companyId, status: "ACTIVE" }, orderBy: { createdAt: "desc" }, include: { tasks: { include: { evidence: true } } } }) : null);
+        const progressPlan = selectedPlan ?? (!current && context.activePlan ? await prisma.actionPlan.findFirst({ where: { id: context.activePlan.id, companyId: auth.companyId, status: "ACTIVE" }, include: { tasks: { include: { evidence: true } } } }) : null);
         const planTasks = progressPlan?.tasks.filter(task => task.status !== "CANCELLED") ?? [];
         const mode = resolveCooMode({ workshopStage: current?.stage ?? null, hasCompletedDiagnostic: Boolean(diagnosis || context.diagnostic?.status === "COMPLETED"), activeTaskCount: planTasks.length, pendingTaskCount: planTasks.filter(task => task.status !== "DONE").length });
         const methods = await prisma.improvementMethod.findMany({ where: { status: "ACTIVE" }, include: { versions: { where: { publishedAt: { not: null } }, orderBy: { version: "desc" }, take: 1 } } });
@@ -118,7 +120,7 @@ export async function POST(request: Request) {
         const planComplete=mode==="PLAN_COMPLETE";
         const operationalTools=cooModeAllowsOperationalTools(mode);
         const agent = new Agent({ name: "COO Fábrica Ágil", model: env.OPENAI_MODEL ?? "gpt-5.6-luna", tools: operationalTools && !(resumeProposalId&&!resumeExecution) ? [consult, propose, createCanvas] : [consult],
-          instructions: `${modeSkill}\n\nMODO DEFINIDO PELO SERVIDOR: ${mode}. Não troque de modo.\n${interviewing ? `${planningSkill}\n${WORKSHOP_AGENT_INSTRUCTIONS}` : `${INDUSTRIAL_CONSULTANT_INSTRUCTIONS}\n${COO_ACTION_INSTRUCTIONS}`}${planLocked ? `\nExiste diagnóstico concluído, mas não há plano aprovado nesta empresa. Não proponha tarefas, projetos, ferramentas ou execução. Oriente o gestor a abrir [o resultado do diagnóstico](/diagnostico?id=${context.diagnostic?.id ?? ""}#proximo-passo) e clicar em Montar plano com o COO.` : ""}${planComplete ? "\nEsta é a conversa fechada de planejamento. O plano já foi aprovado. Informe o link do plano e direcione qualquer execução ou acompanhamento para [o chat geral do COO](/assistente). Não proponha alterações aqui." : ""}${resumeExecution ? "\nO plano completo acabou de ser aprovado pela plataforma. Confirme em uma frase e mostre o link do plano e do chat geral do COO. Não proponha outra ação nesta conversa de planejamento." : resumeProposalId ? "\nEsta resposta retoma a conversa imediatamente após a aprovação de uma etapa preparatória. Não há nova resposta do gestor. Explique em uma frase o que foi salvo e faça uma pergunta concreta sobre o próximo dado indispensável para construir um plano completo com 3 a 5 iniciativas e 5W2H. Não valide hipóteses por aprovação de etapa. Não proponha nem execute ações neste turno. Uma medição ausente pode entrar como primeira iniciativa; não deixe a entrevista parada esperando uma semana de dados." : ""}`,
+          instructions: `${modeSkill}\n\nMODO DEFINIDO PELO SERVIDOR: ${mode}. Não troque de modo.\n${interviewing ? `${planningSkill}\n${WORKSHOP_AGENT_INSTRUCTIONS}` : `${INDUSTRIAL_CONSULTANT_INSTRUCTIONS}\n${COO_ACTION_INSTRUCTIONS}`}${planLocked ? `\nExiste diagnóstico concluído, mas não há plano aprovado nesta empresa. Não proponha tarefas, projetos, ferramentas ou execução. Oriente o gestor a abrir [a aba Plano de ação](/plano-de-acao) e iniciar o plano no diagnóstico desejado.` : ""}${planComplete ? "\nEsta é a conversa fechada de planejamento. O plano já foi aprovado. Informe o link do plano e direcione qualquer execução ou acompanhamento para [o chat geral do COO](/assistente). Não proponha alterações aqui." : ""}${resumeExecution ? "\nO plano completo acabou de ser aprovado pela plataforma. Confirme em uma frase e mostre o link do plano e do chat geral do COO. Não proponha outra ação nesta conversa de planejamento." : resumeProposalId ? "\nEsta resposta retoma a conversa imediatamente após a aprovação de uma etapa preparatória. Não há nova resposta do gestor. Explique em uma frase o que foi salvo e faça uma pergunta concreta sobre o próximo dado indispensável para construir um plano completo com 3 a 5 iniciativas e 5W2H. Não valide hipóteses por aprovação de etapa. Não proponha nem execute ações neste turno. Uma medição ausente pode entrar como primeira iniciativa; não deixe a entrevista parada esperando uma semana de dados." : ""}`,
         });
         // Selected diagnosis is authoritative; historical model prose is not matrix evidence.
         const snapshot = diagnosis?.resultSnapshot && typeof diagnosis.resultSnapshot === "object" ? { ...diagnosis.resultSnapshot as object } as Record<string, unknown> : null;
@@ -153,6 +155,9 @@ export async function POST(request: Request) {
             }
           }
           emit({type:"delta",text});
+        }else if(operationalTools&&message&&asksToCreateTask(message)&&!declaresTaskScope(message)){
+        text="Antes dos outros dados, preciso classificar corretamente: esta tarefa faz parte do plano atual ou é uma tarefa avulsa?";
+        emit({type:"delta",text});
         }else{
         let correction="";
         for(let attempt=0;attempt<3;attempt++){

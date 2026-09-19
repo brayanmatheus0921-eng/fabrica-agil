@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { ArrowDown, ArrowUpRight, Files, History, ListChecks, MoreHorizontal, PanelLeftOpen, Pencil, Plus, RefreshCw, Target, Trash2, X } from "lucide-react";
 import { ReadingDetails } from "@/components/reading-layout";
 import { AssistantProposals } from "@/components/assistant-proposals";
@@ -30,11 +31,11 @@ function ThinkingStatus({ activity }: { activity: string }) {
   </div>;
 }
 
-export function AssistantChat({ messages: initialMessages, threads, currentThreadId, initialWorkshop, initialGenerationId, deleteAction, renameAction, newChatAction, disabled, defaultValue, companyName, hasDiagnostic, hasPlan, suggestions, error }: {
+export function AssistantChat({ messages: initialMessages, threads, currentThreadId, initialWorkshop, initialGenerationId, deleteAction, renameAction, newChatAction, disabled, defaultValue, companyName, hasDiagnostic, hasPlan, suggestions, error, planningWorkspace = false }: {
   messages: Message[]; threads: Array<{ id: string; title: string; updatedAt: string }>; currentThreadId: string;
   initialWorkshop: WorkshopState | null; initialGenerationId: string | null;
   deleteAction: (form: FormData) => void | Promise<void>; renameAction: (form: FormData) => void | Promise<void>; newChatAction: (form: FormData) => void | Promise<void>;
-  disabled?: boolean; defaultValue?: string; companyName: string; hasDiagnostic: boolean; hasPlan: boolean; suggestions: Array<{ label: string; kind: "task" | "review" | "diagnostic" }>; error?: string;
+  disabled?: boolean; defaultValue?: string; companyName: string; hasDiagnostic: boolean; hasPlan: boolean; suggestions: Array<{ label: string; kind: "task" | "review" | "diagnostic" }>; error?: string; planningWorkspace?: boolean;
 }) {
   const router = useRouter();
   const [messages, setMessages] = useState(initialMessages), [draft, setDraft] = useState(defaultValue ?? "");
@@ -207,7 +208,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
   function openThread(id: string) {
     if (busyRef.current || switchingChat || id === activeThreadIdRef.current) return;
     setSwitchingChat(true);
-    window.setTimeout(() => router.push(`/assistente?chat=${id}`), 130);
+    window.setTimeout(() => router.push(`${planningWorkspace ? "/plano-de-acao/construir" : "/assistente"}?chat=${id}`), 130);
   }
 
   const attachedSources=new Set(messages.filter((m,index)=>m.role==="USER"&&messages[index+1]?.role==="ASSISTANT").map(m=>m.id));
@@ -239,8 +240,8 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
       <div className="flex h-full w-[min(90vw,320px)] shrink-0 flex-col lg:w-[292px]">
       <div className="flex h-[65px] shrink-0 items-center justify-between border-b px-4"><div className="flex items-center gap-2"><History className="size-4 text-primary"/><h2 className="text-sm font-bold">Conversas</h2></div><button aria-label="Fechar histórico" title="Fechar histórico" onClick={() => setPanel(false)} className="grid size-9 place-items-center rounded-lg hover:bg-surface-muted"><X className="size-4" /></button></div>
       <div className="sidebar-scroll min-h-0 flex-1 overflow-y-auto p-3">
-        <form action={newChatAction}><button disabled={busy} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border bg-surface px-3 text-xs font-bold transition hover:bg-surface-muted disabled:opacity-40"><Plus className="size-4"/>Nova conversa</button></form>
-        <p className="mt-5 px-1 text-[9px] font-black uppercase tracking-[0.18em] text-muted">Histórico</p>
+        {planningWorkspace ? <Link href="/plano-de-acao" className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border bg-surface px-3 text-xs font-bold transition hover:bg-surface-muted">Voltar aos diagnósticos</Link> : <form action={newChatAction}><button disabled={busy} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border bg-surface px-3 text-xs font-bold transition hover:bg-surface-muted disabled:opacity-40"><Plus className="size-4"/>Nova conversa</button></form>}
+        <p className="mt-5 px-1 text-[9px] font-black uppercase tracking-[0.18em] text-muted">{planningWorkspace ? "Planos por diagnóstico" : "Histórico"}</p>
         <div className="mt-2 space-y-1.5">{threads.map(t => <div key={t.id} className={`group relative flex min-h-11 items-center gap-1 rounded-xl border p-2 pl-3 transition-colors ${t.id === currentThreadId ? "border-primary/35 bg-accent-warm" : "bg-surface hover:bg-surface-muted"}`}><button type="button" aria-current={t.id === currentThreadId ? "page" : undefined} disabled={busy || switchingChat} onClick={() => openThread(t.id)} className="min-w-0 flex-1 truncate text-left text-xs font-bold disabled:opacity-50">{t.title}</button><details className="group/menu relative shrink-0"><summary aria-label={`Opções da conversa ${t.title}`} title="Opções" className="grid size-8 cursor-pointer list-none place-items-center rounded-lg text-muted transition hover:bg-white hover:text-foreground [&::-webkit-details-marker]:hidden"><MoreHorizontal className="size-4" /></summary><div className="absolute right-0 top-9 z-30 w-48 overflow-hidden rounded-xl border bg-white p-1.5 shadow-xl"><details className="group/edit"><summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 rounded-lg px-2.5 text-xs font-semibold hover:bg-surface-muted [&::-webkit-details-marker]:hidden"><Pencil className="size-3.5" />Editar nome</summary><form action={renameAction} className="mt-1 border-t p-2"><input type="hidden" name="threadId" value={t.id} /><label className="text-[10px] font-semibold text-muted">Nome da conversa<input name="title" defaultValue={t.title} maxLength={72} required className="mt-1 w-full rounded-lg border bg-white px-2 py-1.5 text-xs outline-none focus:border-primary" /></label><button disabled={busy} className="mt-2 min-h-8 w-full rounded-lg bg-primary px-2 text-xs font-bold text-white disabled:opacity-40">Salvar nome</button></form></details><form action={deleteAction} className="mt-1 border-t pt-1"><input type="hidden" name="threadId" value={t.id} /><button disabled={busy} className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-30"><Trash2 className="size-3.5" />Excluir conversa</button></form></div></details></div>)}</div>
         <details className="mt-5 rounded-xl border bg-surface">
           <summary className="cursor-pointer list-none px-3 py-3 text-xs font-bold [&::-webkit-details-marker]:hidden">Contexto e etapas do plano</summary>

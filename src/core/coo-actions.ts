@@ -14,12 +14,13 @@ const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
 }, "Informe uma data válida.").nullable();
 const priority = z.enum(["HIGH", "MEDIUM", "LOW", "URGENT"]);
 const projectStatus = z.enum(["ACTIVE", "PAUSED", "COMPLETED"]);
+const taskScope = z.enum(["PLAN", "AD_HOC"]);
 
 // Update fields are optional: omitted preserves the value; nullable fields can be explicitly cleared.
 export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("project.create"), title, objective: z.string().trim().min(3).max(2000), horizonDays: z.number().int().min(1).max(365) }).strict(),
   z.object({ type: z.literal("project.update"), planId: id, title: title.optional(), goal: z.string().trim().min(3).max(2000).optional(), status: projectStatus.optional(), horizonDays: z.number().int().min(1).max(365).optional() }).strict(),
-  z.object({ type: z.literal("task.create"), planId: id, title, description, ownerName, dueDate: date, priority }).strict(),
+  z.object({ type: z.literal("task.create"), scope: taskScope.default("PLAN"), planId: id.nullable(), title, description, ownerName, dueDate: date, priority }).strict(),
   z.object({ type: z.literal("task.update"), taskId: id, title: title.optional(), description: description.nullable().optional(), ownerName: ownerName.optional(), dueDate: date.optional(), priority: priority.optional(), expectedOutput: description.optional(), planId: id.optional() }).strict(),
   z.object({ type: z.literal("task.status"), taskId: id, status: z.enum(["BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "IN_REVIEW", "DONE", "CANCELLED"]), report: z.string().trim().max(5000).nullable() }).strict(),
   z.object({ type: z.literal("task.note"), taskId: id, category: z.enum(["CONTEXT", "APPLIED", "RESULT", "BLOCKER"]), text: z.string().trim().min(3).max(5000) }).strict(),
@@ -58,6 +59,8 @@ export function interviewResumeEligible(action: unknown, proposalId: string, lat
 
 export function validateCooAction(raw: unknown): CooAction {
   const action = actionSchema.parse(raw);
+  if (action.type === "task.create" && action.scope === "PLAN" && !action.planId) throw new Error("Escolha o plano da tarefa.");
+  if (action.type === "task.create" && action.scope === "AD_HOC" && action.planId) throw new Error("Tarefa avulsa não pode ser vinculada ao plano.");
   if ((action.type === "project.update" || action.type === "task.update") && Object.keys(action).length <= 2) throw new Error("Informe o que deseja alterar.");
   if (action.type === "task.status" && action.status === "DONE" && (!action.report || action.report.length < 10 || action.report.split(/\s+/).length < 3)) throw new Error("Conte o que foi feito antes de concluir a tarefa.");
   if (action.type === "company.update" && action.field === "teamSize" && (!/^\d+$/.test(action.value) || Number(action.value) < 1 || Number(action.value) > 100000)) throw new Error("Informe um tamanho de equipe válido.");

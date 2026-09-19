@@ -27,7 +27,7 @@ export function AppShell({ children, companyName, userName, onboardingComplete }
   const pathname = usePathname();
   const segment = pathname.split("/").filter(Boolean)[0] ?? "dashboard";
   const pageName = pageNames[segment] ?? "Fábrica Ágil";
-  const chatPage = segment === "assistente";
+  const chatPage = segment === "assistente" || pathname === "/plano-de-acao/construir";
 
   return (
     <div className="app-shell min-h-screen bg-background lg:pl-[72px]">

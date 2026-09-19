@@ -6,7 +6,7 @@ import { cooPlanSchema } from "@/core/coo-workshop";
 import { readWorkshop } from "@/core/coo-workshop";
 import { resolveCompanyJourney } from "@/core/company-journey";
 import { isDedicatedPlanThread } from "@/core/plan-thread";
-import { GeneratePlanButton } from "@/app/(product)/diagnostico/generate-plan-button";
+import { asDiagnosticRecord } from "@/core/diagnostic-history";
 import {
   ArrowRight,
   Activity,
@@ -95,7 +95,7 @@ export default async function DashboardPage() {
     prisma.conversationThread.findMany({ where: { companyId: company.id }, orderBy: { updatedAt: "desc" }, take: 20, select: { id: true, workflowState: true } }),
   ]);
 
-  const activePlan = activePlans[0] ?? null;
+  const activePlan = activePlans.find(item => asDiagnosticRecord(item.baseline).source !== "COO_AD_HOC") ?? null;
   const onboardingComplete = company.onboardingStatus === "COMPLETED" || Boolean(diagnostic);
   const completedTasks =
     activePlan?.tasks.filter((task) => task.status === "DONE").length ?? 0;
@@ -172,7 +172,7 @@ export default async function DashboardPage() {
               {nextStep.description}
             </p>
           </div>
-          {nextStep.kind === "RESULT" && diagnostic ? <GeneratePlanButton sessionId={diagnostic.id} label={nextStep.label} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b3156] px-5 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#102b48] disabled:opacity-60 lg:w-auto" /> : <Link href={nextStep.href} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b3156] px-5 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#102b48] lg:w-auto">{nextStep.label}<ArrowRight aria-hidden="true" className="size-4" /></Link>}
+          <Link href={nextStep.href} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b3156] px-5 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#102b48] lg:w-auto">{nextStep.label}<ArrowRight aria-hidden="true" className="size-4" /></Link>
         </div>
       </SectionCard>
 

@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 type Params = { project?: string; status?: string; q?: string; error?: string; created?: string };
 const projectLabels = { DRAFT: "Aguardando aprovação", ACTIVE: "Ativo", PAUSED: "Arquivado", COMPLETED: "Concluído", CANCELLED: "Cancelado" } as const;
 function record(value: unknown) { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
-function sourceLabel(value: unknown) { return String(record(value).source ?? "") === "MANUAL" ? "Criado manualmente" : "Criado com o COO"; }
+function sourceLabel(value: unknown) { const source=String(record(value).source ?? ""); return source === "MANUAL" ? "Criado manualmente" : source === "COO_AD_HOC" ? "Demandas avulsas" : "Vinculado ao plano"; }
 
 export default async function TasksPage({ searchParams }: { searchParams: Promise<Params> }) {
   const company = await getDevCompany(), params = await searchParams;

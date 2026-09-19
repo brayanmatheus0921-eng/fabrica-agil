@@ -12,6 +12,7 @@ import { AssistantChat } from "@/components/assistant-chat";
 import { readWorkshop } from "@/core/coo-workshop";
 import { activeGeneration } from "@/server/ai/chat-generation";
 import { asDiagnosticRecord } from "@/core/diagnostic-history";
+import { PLAN_THREAD_PREFIX } from "@/core/plan-thread";
 
 export const metadata: Metadata = { title: "COO" };
 export const dynamic = "force-dynamic";
@@ -34,9 +35,9 @@ export default async function AssistantPage({
   const company = await getDevCompany();
   const params = await searchParams;
 
-  const [threads, diagnostic, plan, selectedDiagnostic] = await Promise.all([
+  const [threads, diagnostic, planCandidates, selectedDiagnostic] = await Promise.all([
     prisma.conversationThread.findMany({
-      where: { companyId: company.id, messages: { some: {} } },
+      where: { companyId: company.id, id: { not: { startsWith: PLAN_THREAD_PREFIX } }, messages: { some: {} } },
       orderBy: { updatedAt: "desc" },
       select: { id: true, title: true, updatedAt: true },
     }),
@@ -45,9 +46,10 @@ export default async function AssistantPage({
       orderBy: { completedAt: "desc" },
       select: { id: true, title: true },
     }),
-    prisma.actionPlan.findFirst({
+    prisma.actionPlan.findMany({
       where: { companyId: company.id, status: "ACTIVE" },
       orderBy: { createdAt: "desc" },
+      take: 20,
       include: { tasks: true },
     }),
     params.diagnostico
@@ -66,6 +68,7 @@ export default async function AssistantPage({
         })
       : null,
   ]);
+  const plan = planCandidates.find(item => asDiagnosticRecord(item.baseline).source !== "COO_AD_HOC") ?? null;
 
   const selectedThreadId = params.chat && threads.some((item) => item.id === params.chat) ? params.chat : null;
   const thread = selectedThreadId

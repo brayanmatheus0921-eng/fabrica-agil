@@ -16,7 +16,7 @@ export function CooPlanOverview({plan,sourceDiagnosis,threadId,demo,approval,err
   const nextTask=plan.tasks.find(task=>task.status==="IN_PROGRESS")??plan.tasks.find(task=>task.status==="TODO");
   const completed=plan.tasks.filter(t=>t.status==="DONE").length;
   const allDone=plan.tasks.length>0&&completed===plan.tasks.length;
-  const consultant=threadId?`/assistente?chat=${threadId}`:"/assistente";
+  const consultant=pending&&threadId?`/plano-de-acao/construir?chat=${threadId}`:"/assistente";
   const nextHref=pending?"#quadro-plano":active&&nextTask?`/tarefas/${nextTask.id}`:consultant;
   const nextLabel=pending?"Revisar meu plano":active&&nextTask?"Abrir próximo passo":allDone?"Revisar os resultados":"Conversar com o COO";
   return <div className="mx-auto max-w-6xl space-y-7 pb-5">

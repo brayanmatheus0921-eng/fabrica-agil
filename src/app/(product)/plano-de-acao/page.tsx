@@ -5,7 +5,7 @@ import {
   CalendarDays,
   CheckCircle2,
   Circle,
-  Map,
+  Map as MapIcon,
   Sparkles,
   Target,
 } from "lucide-react";
@@ -19,6 +19,8 @@ import { CooWorkshopPlan } from "@/components/coo-workshop-plan";
 import { CooPlanOverview } from "@/components/coo-plan-overview";
 import { cooPlanSchema, readWorkshop } from "@/core/coo-workshop";
 import { asDiagnosticRecord } from "@/core/diagnostic-history";
+import { isDedicatedPlanThread } from "@/core/plan-thread";
+import { GeneratePlanButton } from "@/app/(product)/diagnostico/generate-plan-button";
 import {
   approveActionPlan,
   createDraftPlan,
@@ -43,14 +45,15 @@ export default async function ActionPlanPage({
 }) {
   const company = await getDevCompany();
   const params = await searchParams;
-  const [plan, recommendation, completedDiagnosis, recentThreads] = await Promise.all([
-    prisma.actionPlan.findFirst({
+  const [planCandidates, recommendation, completedDiagnoses, recentThreads, plansForDiagnoses] = await Promise.all([
+    prisma.actionPlan.findMany({
       where: {
         companyId: company.id,
         ...(params.id ? { id: params.id } : {}),
         status: { in: ["DRAFT", "ACTIVE", "PAUSED", "COMPLETED"] },
       },
       orderBy: { createdAt: "desc" },
+      take: 20,
       include: {
         tasks: { orderBy: { sortOrder: "asc" } },
         recommendation: {
@@ -71,10 +74,21 @@ export default async function ActionPlanPage({
         },
       },
     }),
-    prisma.diagnosticSession.count({where:{companyId:company.id,status:"COMPLETED"}}),
+    prisma.diagnosticSession.findMany({
+      where: { companyId: company.id, status: "COMPLETED" },
+      orderBy: { completedAt: "desc" },
+      select: { id: true, title: true, resultSummary: true, completedAt: true },
+    }),
     prisma.conversationThread.findMany({where:{companyId:company.id,status:"ACTIVE"},select:{id:true,workflowState:true},orderBy:{updatedAt:"desc"},take:20}),
+    prisma.actionPlan.findMany({
+      where: { companyId: company.id, status: { not: "CANCELLED" } },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, title: true, status: true, baseline: true },
+    }),
   ]);
-  const planningThread=recentThreads.find(thread=>{const state=readWorkshop(thread.workflowState);return state&&state.stage!=="FOLLOW_UP"&&!state.planId;});
+  const plan = planCandidates.find(item => asDiagnosticRecord(item.baseline).source !== "COO_AD_HOC") ?? null;
+  const completedDiagnosis = completedDiagnoses.length;
+  const planningThread=recentThreads.find(thread=>{const state=readWorkshop(thread.workflowState);return isDedicatedPlanThread(thread.id)&&state&&state.stage!=="FOLLOW_UP"&&!state.planId;});
 
   const completed = plan?.tasks.filter((task) => task.status === "DONE").length ?? 0;
   const total = plan?.tasks.length ?? 0;
@@ -88,21 +102,39 @@ export default async function ActionPlanPage({
     ? await prisma.conversationThread.findFirst({ where: { id: baseline.threadId, companyId: company.id } }) : null;
   const workshop = readWorkshop(workshopThread?.workflowState);
   const readyToApprove = baseline.source !== "COO_COLLABORATIVE" || (workshop?.stage === "REVIEW" && workshop.revision === baseline.workshopRevision && !workshopThread?.generationId);
+  const planByDiagnosis = new Map(plansForDiagnoses.flatMap(item => {
+    const diagnosticId = asDiagnosticRecord(item.baseline).diagnosticSessionId;
+    return typeof diagnosticId === "string" ? [[diagnosticId, item] as const] : [];
+  }));
+  const threadByDiagnosis = new Map(recentThreads.flatMap(item => {
+    const state = readWorkshop(item.workflowState);
+    return state && isDedicatedPlanThread(item.id) ? [[state.diagnosticId, { id: item.id, state }] as const] : [];
+  }));
+  const diagnosisHub = completedDiagnoses.length ? <section className="rounded-2xl border bg-white p-5 sm:p-6">
+    <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">Planos por diagnóstico</p><h2 className="mt-2 text-xl font-black tracking-[-0.02em]">Escolha o diagnóstico que deseja transformar em ação</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-muted">Cada diagnóstico tem sua própria conversa de planejamento. O COO geral só entra depois que o plano completo for aprovado.</p></div><StatusPill>{completedDiagnoses.length} {completedDiagnoses.length === 1 ? "diagnóstico" : "diagnósticos"}</StatusPill></div>
+    <div className="mt-5 grid gap-3 lg:grid-cols-2">{completedDiagnoses.map(diagnosis => {
+      const linkedPlan = planByDiagnosis.get(diagnosis.id);
+      const linkedThread = threadByDiagnosis.get(diagnosis.id);
+      const status = linkedPlan ? linkedPlan.status === "DRAFT" ? "Aguardando aprovação" : linkedPlan.status === "ACTIVE" ? "Plano ativo" : linkedPlan.status === "COMPLETED" ? "Plano concluído" : "Plano pausado" : linkedThread ? "Em construção" : "Pronto para planejar";
+      return <article key={diagnosis.id} className="flex flex-col rounded-xl border bg-[#fbfcfd] p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">{diagnosis.title ?? "Diagnóstico operacional"}</h3><p className="mt-1 text-xs text-muted">Concluído {diagnosis.completedAt ? new Intl.DateTimeFormat("pt-BR").format(diagnosis.completedAt) : "recentemente"}</p></div><span className="rounded-full bg-surface-muted px-2.5 py-1 text-[10px] font-semibold">{status}</span></div><p className="mt-3 line-clamp-3 flex-1 text-sm leading-6 text-muted">{diagnosis.resultSummary ?? "Resultado salvo. Abra o diagnóstico para consultar os gargalos identificados."}</p><div className="mt-4 flex flex-wrap gap-2"><Link href={`/diagnostico?id=${diagnosis.id}`} className="inline-flex min-h-10 items-center rounded-lg border bg-white px-3 text-xs font-semibold">Ver resultado</Link>{linkedPlan ? <Link href={`/plano-de-acao?id=${linkedPlan.id}`} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-primary px-3 text-xs font-semibold text-white">Abrir plano<ArrowRight className="size-3.5" /></Link> : linkedThread ? <Link href={`/plano-de-acao/construir?chat=${linkedThread.id}`} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-primary px-3 text-xs font-semibold text-white">Continuar plano<ArrowRight className="size-3.5" /></Link> : <GeneratePlanButton sessionId={diagnosis.id} label="Iniciar plano" className="inline-flex min-h-10 items-center rounded-lg bg-primary px-3 text-xs font-semibold text-white disabled:opacity-60" />}</div></article>;
+    })}</div>
+  </section> : null;
 
   if (plan && cooPlanSchema.safeParse(plan.targetOutcome).success) {
-    return <CooPlanOverview plan={plan} sourceDiagnosis={typeof sourceDiagnosis === "string" ? sourceDiagnosis : undefined} threadId={typeof baseline.threadId === "string" ? baseline.threadId : undefined} demo={baseline.demo === true} error={params.error} approval={
+    return <div className="space-y-6">{diagnosisHub}<CooPlanOverview plan={plan} sourceDiagnosis={typeof sourceDiagnosis === "string" ? sourceDiagnosis : undefined} threadId={typeof baseline.threadId === "string" ? baseline.threadId : undefined} demo={baseline.demo === true} error={params.error} approval={
       <form action={approveActionPlan}>
         {!readyToApprove ? <p className="mb-3 text-sm text-amber-800">Você reabriu uma etapa. Termine a revisão com o COO antes de aprovar.</p> : null}
         <input type="hidden" name="planId" value={plan.id}/>
         <button disabled={!readyToApprove} className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-primary px-5 py-3 text-sm font-medium text-white disabled:opacity-40">Aprovar e começar<ArrowRight aria-hidden="true" className="size-4"/></button>
       </form>
-    }/>;
+    }/></div>;
   }
 
   return (
     <div className="space-y-6 sm:space-y-8">
       {typeof sourceDiagnosis === "string" ? <Link href={`/diagnostico?id=${sourceDiagnosis}`} className="text-sm font-bold text-primary">← Ver diagnóstico deste plano</Link> : null}
       <GuidedJourney current={2} />
+      {diagnosisHub}
 
       <PageHeader
         eyebrow="Seu caminho de execução"
@@ -124,7 +156,7 @@ export default async function ActionPlanPage({
       {plan ? <DiagnosticPlanPriorities outcome={plan.targetOutcome} /> : null}
       {baseline.demo === true ? <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">Exemplo pronto para revisão. Usa o diagnóstico salvo e seus relatos anteriores; passos, prazos e iniciativas de apoio são sugestões. Exemplos nos formulários são fictícios. Nenhuma melhoria ou execução foi registrada.</p> : null}
       {plan ? <CooWorkshopPlan outcome={plan.targetOutcome} tasks={plan.tasks.map(task => ({ id: task.id, status: task.status, dueAt: task.dueAt?.toISOString() ?? null }))} status={plan.status} /> : null}
-      {typeof asDiagnosticRecord(plan?.baseline).threadId === "string" ? <Link href={`/assistente?chat=${asDiagnosticRecord(plan?.baseline).threadId}`} className="inline-flex text-sm font-bold underline">Continuar ou revisar com o COO</Link> : null}
+      {typeof asDiagnosticRecord(plan?.baseline).threadId === "string" ? <Link href={`/plano-de-acao/construir?chat=${asDiagnosticRecord(plan?.baseline).threadId}`} className="inline-flex text-sm font-bold underline">Continuar ou revisar o plano</Link> : null}
 
       {params.draft ? (
         <div className="flex items-center gap-3 rounded-2xl border border-primary/20 bg-accent/45 px-4 py-3 text-sm font-semibold text-primary-strong">
@@ -305,7 +337,7 @@ export default async function ActionPlanPage({
         <SectionCard className="grid min-h-[390px] place-items-center p-7 text-center">
           <div className="max-w-xl">
             <span className="mx-auto grid size-16 place-items-center rounded-2xl bg-accent text-primary">
-              <Map aria-hidden="true" className="size-7" />
+              <MapIcon aria-hidden="true" className="size-7" />
             </span>
             <h2 className="mt-5 text-xl font-bold">
               {recommendation
@@ -337,7 +369,7 @@ export default async function ActionPlanPage({
                 </button>
               </form>
             ) : planningThread || completedDiagnosis ? (
-              <Link href={planningThread ? `/assistente?chat=${planningThread.id}` : "/assistente"} className="mt-6 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-bold text-white">
+              <Link href={planningThread ? `/plano-de-acao/construir?chat=${planningThread.id}` : "/plano-de-acao"} className="mt-6 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-bold text-white">
                 Continuar plano com o COO<ArrowRight aria-hidden="true" className="size-4" />
               </Link>
             ) : (

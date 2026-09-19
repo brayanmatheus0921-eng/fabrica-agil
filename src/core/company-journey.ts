@@ -31,7 +31,7 @@ export function resolveCompanyJourney(input: CompanyJourneyInput): CompanyJourne
     return { kind: "FOLLOW_UP", eyebrow: "Faça isso agora", title: "Conte ao COO o resultado da execução", description: "O COO compara os registros com o diagnóstico e atualiza o acompanhamento com sua aprovação.", href: "/assistente", label: "Falar com o COO" };
   }
   if (input.workshop && input.workshop.stage !== "FOLLOW_UP") {
-    return { kind: "PLANNING", eyebrow: "Faça isso agora", title: "Termine seu plano com o COO", description: "Responda somente a próxima pergunta. O COO organizará de 3 a 5 iniciativas antes de pedir sua aprovação.", href: `/assistente?chat=${input.workshop.threadId}`, label: "Continuar meu plano" };
+    return { kind: "PLANNING", eyebrow: "Faça isso agora", title: "Termine seu plano de ação", description: "Responda somente a próxima pergunta no espaço exclusivo do plano. O planejador organizará de 3 a 5 iniciativas antes de pedir sua aprovação.", href: `/plano-de-acao/construir?chat=${input.workshop.threadId}`, label: "Continuar meu plano" };
   }
-  return { kind: "RESULT", eyebrow: "Diagnóstico concluído", title: "Transforme o resultado em um plano", description: "Converse com o COO para definir responsáveis, prazo, capacidade e recursos. Nenhuma tarefa será criada antes da aprovação do plano completo.", href: `/diagnostico?id=${input.diagnosticId}#proximo-passo`, label: "Montar plano com o COO" };
+  return { kind: "RESULT", eyebrow: "Diagnóstico concluído", title: "Transforme o resultado em um plano", description: "Abra a área de planos, escolha este diagnóstico e defina responsáveis, prazo, capacidade e recursos. Nenhuma tarefa será criada antes da aprovação completa.", href: "/plano-de-acao", label: "Abrir planos" };
 }
