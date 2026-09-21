@@ -213,7 +213,7 @@ async function main() {
 
   const result = await prisma.$transaction(async tx => {
     await tx.conversationThread.create({ data: {
-      id: threadId, companyId: DEV_COMPANY_ID, title: "Simulação · Criação do plano — fluxo e atrasos",
+      id: threadId, companyId: DEV_COMPANY_ID, kind: "PLAN", title: "Simulação · Criação do plano — fluxo e atrasos",
       status: "ACTIVE", lastMessageAt: now, workflowState: reviewState as never,
     } });
     await tx.conversationMessage.createMany({ data: simulatedMessages.map((message, index) => ({

@@ -554,6 +554,11 @@ model EvidenceOutput {
   @@index([checkinId])
 }
 
+enum ConversationKind {
+  PLAN
+  COO
+}
+
 model ConversationThread {
   cooProposals  CooActionProposal[]
   artifacts     WorkspaceArtifact[]
@@ -563,6 +568,8 @@ model ConversationThread {
   status        ConversationStatus    @default(ACTIVE)
   lastMessageAt DateTime?
   workflowState Json?
+  conversationMemory Json?
+  kind ConversationKind @default(COO)
   generationId String?
   generationStartedAt DateTime?
   company       Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)

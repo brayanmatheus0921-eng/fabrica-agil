@@ -25,11 +25,11 @@ export const workshopPatchSchema = z.object({
   hypotheses: z.array(z.string()).max(20),
   decision: z.object({ primaryTitle: z.string().min(1), reason: z.string().min(1), basis: z.enum(["MATRIX", "NEW_EVIDENCE", "PREFERENCE"]), confirmedByMessageId: z.string() }).nullable(),
   planningAgreement: z.object({
-    priority: z.object({ sourceMessageId: z.string(), excerpt: z.string().min(8) }),
-    ownership: z.object({ sourceMessageId: z.string(), excerpt: z.string().min(8) }),
-    deadline: z.object({ sourceMessageId: z.string(), excerpt: z.string().min(8) }),
-    capacity: z.object({ sourceMessageId: z.string(), excerpt: z.string().min(8) }),
-    resources: z.object({ sourceMessageId: z.string(), excerpt: z.string().min(8) }),
+    priority: z.object({ sourceMessageId: z.string(), excerpt: z.string().min(1) }),
+    ownership: z.object({ sourceMessageId: z.string(), excerpt: z.string().min(1) }),
+    deadline: z.object({ sourceMessageId: z.string(), excerpt: z.string().min(1) }),
+    capacity: z.object({ sourceMessageId: z.string(), excerpt: z.string().min(1) }),
+    resources: z.object({ sourceMessageId: z.string(), excerpt: z.string().min(1) }),
   }).nullable().optional(),
   plan: cooPlanSchema.nullable(),
 });
@@ -53,7 +53,7 @@ export function readWorkshop(value: unknown): WorkshopState | null {
 export function newWorkshop(diagnosticId: string, diagnosticTitle: string): WorkshopState {
   return { skillVersion: 1, diagnosticId, diagnosticTitle, stage: "UNDERSTAND", revision: 0, furthestStage: 0, summary: "Aguardando confirmação do momento atual da fábrica.", confirmedFacts: [], hypotheses: [], decision: null, plan: null, planId: null, history: [] };
 }
-export function applyWorkshopPatch(current: WorkshopState, raw: unknown, userMessages: Array<{id:string;content:string}>, evidenceCodes: string[], methodCodes: string[]): WorkshopState {
+export function applyWorkshopPatch(current: WorkshopState, raw: unknown, userMessages: Array<{id:string;content:string}>, evidenceCodes: string[], methodCodes: string[], confirmedReplyIds: string[] = []): WorkshopState {
   const patch = workshopPatchSchema.parse(raw);
   const userIds=userMessages.map(message=>message.id);
   const nextIndex = WORKSHOP_STAGES.indexOf(patch.stage);
@@ -73,6 +73,7 @@ export function applyWorkshopPatch(current: WorkshopState, raw: unknown, userMes
     if(!patch.planningAgreement)throw new Error("Antes do plano final, confirme prioridade, responsáveis, prazo, capacidade e recursos com o gestor.");
     for(const [category,source] of Object.entries(patch.planningAgreement)){
       const message=userMessages.find(row=>row.id===source.sourceMessageId);
+      if(message && /^(sim|isso|isso mesmo|exato|exatamente|pode ser|concordo|confirmo|certo|ok)[.!\s]*$/i.test(message.content.trim()) && !confirmedReplyIds.includes(message.id)) throw new Error("Confirmação curta exige sugestão inequívoca vinculada no Registro.");
       if(!message||!message.content.toLocaleLowerCase("pt-BR").includes(source.excerpt.trim().toLocaleLowerCase("pt-BR")))throw new Error(`Confirmação de ${category} sem trecho real da mensagem do gestor.`);
     }
   }

@@ -19,12 +19,13 @@ import { CANVAS_INSTRUCTIONS } from "@/server/ai/artifact-agent";
 import { taskProgress } from "@/core/task-progress";
 import { findReusableCanvas } from "@/server/artifact-deduplication";
 import { cooModeAllowsOperationalTools, resolveCooMode } from "@/core/coo-mode";
+import { CONVERSATION_MEMORY_INSTRUCTIONS, consolidateMemory, memoryDraftSchema, memorySourceIds, readConversationMemory, resolveShortConfirmation, workshopFromMemory, type ConversationMemory } from "@/core/conversation-memory";
+import { asksToCreateTask, declaresTaskScope, findReferencedTask } from "@/core/task-intent";
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
-const inputSchema = z.object({ threadId: z.string().min(1).max(200), requestId: z.string().uuid(), message: z.string().trim().min(1).max(6000).optional(), resumeProposalId: z.string().min(1).max(200).optional() }).strict().refine(value => Boolean(value.message) !== Boolean(value.resumeProposalId));
-const asksToCreateTask = (value: string) => /(?:\b(?:adicion|cri|inclu|registr)\w*\b[^.?!]{0,100}\btarefa\b|\btarefa\b[^.?!]{0,100}\b(?:adicion|cri|inclu|registr)\w*\b)/i.test(value);
-const declaresTaskScope = (value: string) => /\b(?:avuls\w*|fora\s+do\s+plano|plano\s+atual|faz\s+parte\s+do\s+plano|iniciativa\s+do\s+plano)\b/i.test(value);
+const inputSchema = z.object({ threadId: z.string().min(1).max(200), workspace: z.enum(["PLAN", "COO"]).optional(), requestId: z.string().uuid(), message: z.string().trim().min(1).max(6000).optional(), resumeProposalId: z.string().min(1).max(200).optional() }).strict().refine(value => Boolean(value.message) !== Boolean(value.resumeProposalId));
+const advisoryResponseSchema = z.object({ reply: z.string().min(1), memory: memoryDraftSchema });
 
 export async function POST(request: Request) {
   const auth = await requireAuth();
@@ -41,7 +42,7 @@ export async function POST(request: Request) {
   const lockedThreadId = await prisma.$transaction(async tx => {
     let targetThreadId = requestedThreadId;
     if (requestedThreadId === "new") {
-      if (!message) return null;
+      if (!message || parsed.data.workspace === "PLAN") return null;
       const cleanTitle = message.replace(/\s+/g, " ").trim();
       const created = await tx.conversationThread.create({ data: {
         companyId: auth.companyId,
@@ -51,6 +52,8 @@ export async function POST(request: Request) {
       }, select: { id: true } });
       targetThreadId = created.id;
     } else {
+      const target = await tx.conversationThread.findFirst({ where: { id: requestedThreadId, companyId: auth.companyId }, select: { kind: true } });
+      if (!target || (parsed.data.workspace && target.kind !== parsed.data.workspace)) return null;
       if (resumeProposalId) {
         const proposal = await tx.cooActionProposal.findFirst({ where: { id: resumeProposalId, threadId: requestedThreadId, companyId: auth.companyId, proposedByUserId: auth.userId, status: "APPLIED" } });
         if (!proposal) return null;
@@ -82,10 +85,18 @@ export async function POST(request: Request) {
       try {
         emit({ type: "ack", userId, assistantId, threadId });
         emit({ type: "activity", text: "Consultando o diagnóstico e o contexto salvo…" });
-        const thread = await prisma.conversationThread.findFirstOrThrow({ where: { id: threadId, companyId: auth.companyId }, include: { messages: { orderBy: { createdAt: "desc" }, take: 40 } } });
-        const current = readWorkshop(thread.workflowState);
+        const thread = await prisma.conversationThread.findFirstOrThrow({ where: { id: threadId, companyId: auth.companyId } });
+        const previousMemory = readConversationMemory(thread.conversationMemory, thread.kind);
+        const recent = await prisma.conversationMessage.findMany({ where: { threadId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], ...(thread.conversationMemory ? { take: 40 } : {}) });
+        const olderSources = await prisma.conversationMessage.findMany({ where: { threadId, id: { in: memorySourceIds(previousMemory), notIn: recent.map(row => row.id) } }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+        const history = [...olderSources, ...recent.reverse()];
+        const current = thread.kind === "PLAN" ? readWorkshop(thread.workflowState) : null;
+        if (thread.kind === "PLAN" && !current) throw Error("Conversa de plano sem diagnóstico vinculado.");
+        let nextMemory: ConversationMemory = previousMemory;
+        const resolvedConfirmation = resolveShortConfirmation(previousMemory, history);
+        const acceptMemory = (draft: z.infer<typeof memoryDraftSchema>, answer: string) => consolidateMemory(previousMemory, { ...draft, awaitingConfirmation: draft.suggestedConfirmation ? { text: draft.suggestedConfirmation, assistantMessageId: assistantId } : null }, history, thread.kind, assistantId, answer);
         const resumeExecution=Boolean(resumeProposalId&&current?.stage==="FOLLOW_UP");
-        const proposalSourceId=userId??(resumeExecution?thread.messages.find(m=>m.role==="USER")?.id:null);
+        const proposalSourceId=userId??(resumeExecution?history.findLast(m=>m.role==="USER")?.id:null);
         let actionDraft: CooAction | null = null;
         const context = await loadCompanyContext(auth.companyId);
         const diagnosis = current ? await prisma.diagnosticSession.findFirst({ where: { id: current.diagnosticId, companyId: auth.companyId, status: "COMPLETED" }, include: { answers: { include: { question: true } } } }) : null;
@@ -93,12 +104,14 @@ export async function POST(request: Request) {
         const selectedPlan = current?.planId ? await prisma.actionPlan.findFirst({ where: { id: current.planId, companyId: auth.companyId }, include: { tasks: { include: { evidence: { orderBy: { createdAt: "desc" }, take: 100 } } }, checkins: { orderBy: { createdAt: "desc" }, take: 5 } } }) : null;
         const progressPlan = selectedPlan ?? (!current && context.activePlan ? await prisma.actionPlan.findFirst({ where: { id: context.activePlan.id, companyId: auth.companyId, status: "ACTIVE" }, include: { tasks: { include: { evidence: true } } } }) : null);
         const planTasks = progressPlan?.tasks.filter(task => task.status !== "CANCELLED") ?? [];
+        const referencedTask = message ? findReferencedTask(message, planTasks) : null;
         const mode = resolveCooMode({ workshopStage: current?.stage ?? null, hasCompletedDiagnostic: Boolean(diagnosis || context.diagnostic?.status === "COMPLETED"), activeTaskCount: planTasks.length, pendingTaskCount: planTasks.filter(task => task.status !== "DONE").length });
         const methods = await prisma.improvementMethod.findMany({ where: { status: "ACTIVE" }, include: { versions: { where: { publishedAt: { not: null } }, orderBy: { version: "desc" }, take: 1 } } });
         const catalog = methods.filter(m => m.versions.length).map(m => ({ code: m.code, name: m.name, description: m.description, steps: m.versions[0].steps }));
         async function stageAction(raw: unknown) {
           if (actionDraft) return "Já existe uma proposta nesta resposta. Aguarde a aprovação antes de propor outra ação.";
           try {
+            if (raw && typeof raw === "object" && "type" in raw && String(raw.type).startsWith("workshop.")) return "A construção do plano ocorre somente no Chat do Plano.";
             const prepared = await prepareAction(prisma, auth, threadId, raw);
             actionDraft = prepared.action;
             return JSON.stringify({ summary: prepared.summary, details: prepared.details, notice: "Somente proposta. Nenhuma alteração foi executada. Termine perguntando exatamente a pergunta summary. O cartão Aprovar aparecerá ao concluir a resposta." });
@@ -119,7 +132,7 @@ export async function POST(request: Request) {
         const planLocked=mode==="PLAN_REQUIRED";
         const planComplete=mode==="PLAN_COMPLETE";
         const operationalTools=cooModeAllowsOperationalTools(mode);
-        const agent = new Agent({ name: "COO Fábrica Ágil", model: env.OPENAI_MODEL ?? "gpt-5.6-luna", tools: operationalTools && !(resumeProposalId&&!resumeExecution) ? [consult, propose, createCanvas] : [consult],
+        const agent = new Agent({ name: "COO Fábrica Ágil", model: env.OPENAI_MODEL ?? "gpt-5.6-luna", outputType: advisoryResponseSchema, tools: thread.kind === "PLAN" ? [] : operationalTools && !(resumeProposalId&&!resumeExecution) ? [consult, propose, createCanvas] : [consult],
           instructions: `${modeSkill}\n\nMODO DEFINIDO PELO SERVIDOR: ${mode}. Não troque de modo.\n${interviewing ? `${planningSkill}\n${WORKSHOP_AGENT_INSTRUCTIONS}` : `${INDUSTRIAL_CONSULTANT_INSTRUCTIONS}\n${COO_ACTION_INSTRUCTIONS}`}${planLocked ? `\nExiste diagnóstico concluído, mas não há plano aprovado nesta empresa. Não proponha tarefas, projetos, ferramentas ou execução. Oriente o gestor a abrir [a aba Plano de ação](/plano-de-acao) e iniciar o plano no diagnóstico desejado.` : ""}${planComplete ? "\nEsta é a conversa fechada de planejamento. O plano já foi aprovado. Informe o link do plano e direcione qualquer execução ou acompanhamento para [o chat geral do COO](/assistente). Não proponha alterações aqui." : ""}${resumeExecution ? "\nO plano completo acabou de ser aprovado pela plataforma. Confirme em uma frase e mostre o link do plano e do chat geral do COO. Não proponha outra ação nesta conversa de planejamento." : resumeProposalId ? "\nEsta resposta retoma a conversa imediatamente após a aprovação de uma etapa preparatória. Não há nova resposta do gestor. Explique em uma frase o que foi salvo e faça uma pergunta concreta sobre o próximo dado indispensável para construir um plano completo com 3 a 5 iniciativas e 5W2H. Não valide hipóteses por aprovação de etapa. Não proponha nem execute ações neste turno. Uma medição ausente pode entrar como primeira iniciativa; não deixe a entrevista parada esperando uma semana de dados." : ""}`,
         });
         // Selected diagnosis is authoritative; historical model prose is not matrix evidence.
@@ -127,13 +140,18 @@ export async function POST(request: Request) {
         if (snapshot) { delete snapshot.analysis; delete snapshot.analysisError; }
         const artifacts = await prisma.workspaceArtifact.findMany({ where: { companyId: auth.companyId, OR: [{threadId}, ...(progressPlan ? [{taskId: {in: progressPlan.tasks.map(t=>t.id)}}] : [])] }, select: {id:true,title:true,taskId:true,kind:true,confirmedAt:true,interpretation:true}, orderBy:{updatedAt:"desc"},take:30 });
         const automaticProgress = progressPlan ? taskProgress(progressPlan.tasks, artifacts) : null;
-        const scopedContext = current ? { company: context.company, selectedPlan, memories: context.memories, note: "Use exclusivamente o diagnóstico selecionado abaixo. Memórias são contexto histórico, não substituem a matriz." } : context;
-        const projects = await readSystem(prisma, auth.companyId, {area:"projects",query:"",projectId:null,recordId:null,offset:0});
-        const input = JSON.stringify({ today: new Date().toLocaleDateString("sv-SE", {timeZone:"America/Sao_Paulo"}), cooMode: mode, projects, context: scopedContext, automaticProgress, artifacts: artifacts.map(a=>({...a, interpretation:a.confirmedAt?a.interpretation:null, notice:a.confirmedAt?"Leitura confirmada pelo usuário; não prova independente.":"Rascunho ou leitura pendente; não usar como resultado."})), workshop: current, diagnosis: diagnosis ? { id: diagnosis.id, title: diagnosis.title, matrix: snapshot, answers: diagnosis.answers.map(a => ({ code: a.question.code, question: a.question.prompt, value: a.value, notes: a.notes })) } : null, methods: catalog, messages: [...thread.messages].reverse().map(m => ({ id: m.id, role: m.role, content: m.content })), ...(resumeProposalId ? { continuation: resumeExecution ? "Plano completo aprovado: organizar ferramentas necessárias e primeiro passo nas tarefas existentes." : "Aprovação de etapa preparatória; fazer a próxima pergunta sem afirmar que o plano foi aprovado." } : {}) });
+        agent.instructions = `${agent.instructions}\n${CONVERSATION_MEMORY_INSTRUCTIONS}`;
+        const scopedContext = current ? { company: context.company, selectedPlan, note: "Use exclusivamente o diagnóstico e a memória desta conversa de Plano. Não acesse conversas ou ferramentas do COO." } : context;
+        const projects = current ? [] : await readSystem(prisma, auth.companyId, {area:"projects",query:"",projectId:null,recordId:null,offset:0});
+        const input = JSON.stringify({ conversationMemory: previousMemory, resolvedConfirmation, currentPlan: current ? selectedPlan : context.activePlan, today: new Date().toLocaleDateString("sv-SE", {timeZone:"America/Sao_Paulo"}), cooMode: mode, projects, context: scopedContext, automaticProgress, artifacts: current ? [] : artifacts.map(a=>({...a, interpretation:a.confirmedAt?a.interpretation:null, notice:a.confirmedAt?"Leitura confirmada pelo usuário; não prova independente.":"Rascunho ou leitura pendente; não usar como resultado."})), workshop: current, diagnosis: diagnosis ? { id: diagnosis.id, title: diagnosis.title, matrix: snapshot, answers: diagnosis.answers.map(a => ({ code: a.question.code, question: a.question.prompt, value: a.value, notes: a.notes })) } : null, methods: catalog, messages: history.map(m => ({ id: m.id, role: m.role, content: m.content })), currentMessage: message ?? null, ...(resumeProposalId ? { continuation: "Aprovação confirmada pela plataforma. Informe o resultado e o próximo destino, sem novas ações." } : {}) });
         emit({ type: "activity", text: "Preparando uma resposta e o próximo passo…" });
-        if(interviewing){
-          const responseSchema=groundedInterviewSchema(thread.messages.filter(m=>m.role==="USER").map(m=>m.id),diagnosis?.answers.map(a=>a.question.code)??[],catalog.map(m=>m.code));
-          const interviewer=new Agent({name:"COO planejamento",model:env.OPENAI_MODEL ?? "gpt-5.6-sol",instructions:agent.instructions as string,tools:[consult],outputType:responseSchema,modelSettings:{reasoning:{effort:"medium"}}});
+        if(resumeExecution){
+          text="Plano aprovado e tarefas liberadas. Você pode [acompanhar o plano](/plano-de-acao) ou seguir para [o chat geral do COO](/assistente) para executar, registrar resultados e ajustar o trabalho com sua aprovação.";
+          nextMemory={...previousMemory,currentStage:"REVIEW",nextStep:"Acompanhar a execução no plano ou continuar no chat geral do COO.",pendingQuestions:[],awaitingConfirmation:null};
+          emit({type:"delta",text});
+        }else if(interviewing){
+          const responseSchema=groundedInterviewSchema(history.filter(m=>m.role==="USER").map(m=>m.id),diagnosis?.answers.map(a=>a.question.code)??[],catalog.map(m=>m.code));
+          const interviewer=new Agent({name:"Planejador",model:env.OPENAI_MODEL ?? "gpt-5.6-sol",instructions:agent.instructions as string,tools:[],outputType:responseSchema,modelSettings:{reasoning:{effort:"medium"}}});
           let correction="";
           for(let attempt=0;attempt<3;attempt++){
             try{
@@ -147,6 +165,7 @@ export async function POST(request: Request) {
               }else{
                 text=renderInterviewQuestion(answer.reply,answer.question);
               }
+              nextMemory = acceptMemory(answer.memory, text);
               break;
             }catch(error){
               if(attempt===2||controller.signal.aborted)throw error;
@@ -157,17 +176,20 @@ export async function POST(request: Request) {
           emit({type:"delta",text});
         }else if(operationalTools&&message&&asksToCreateTask(message)&&!declaresTaskScope(message)){
         text="Antes dos outros dados, preciso classificar corretamente: esta tarefa faz parte do plano atual ou é uma tarefa avulsa?";
+        nextMemory = { ...previousMemory, pendingQuestions: [text, ...previousMemory.pendingQuestions.filter(row => row !== text)].slice(0, 12), nextStep: text, awaitingConfirmation: null };
         emit({type:"delta",text});
         }else{
         let correction="";
         for(let attempt=0;attempt<3;attempt++){
           actionDraft=null;
           const result=await run(agent,input+correction,{signal:controller.signal,maxTurns:8});
-          const candidate=String(result.finalOutput??"").trim();
+          const answer = advisoryResponseSchema.parse(result.finalOutput);
+          const candidate=answer.reply.trim();
           const asksBareApproval=/\bposso\b[^?]{0,180}\?\s*$/i.test(candidate)&&!actionDraft;
-          if(!asksBareApproval){text=candidate;break;}
+          const falseTargetFailure=Boolean(!actionDraft&&referencedTask&&/(?:não|nao)\s+(?:consegui|encontrei|localizei)|confirm(?:ar|e)[^.?]{0,80}\b(?:id|nome)\b|destino[^.?]{0,50}(?:inválido|indisponível|não)/i.test(candidate));
+          if(!asksBareApproval&&!falseTargetFailure){text=candidate;nextMemory=acceptMemory(answer.memory,candidate);break;}
           if(attempt===2)throw new Error("O COO não conseguiu preparar uma proposta segura.");
-          correction="\nSua resposta anterior pediu autorização sem criar o cartão. Consulte o ID real já presente em context.activePlan e chame a ferramenta de proposta nesta resposta. Não termine com 'Posso...?' sem uma proposta validada.";
+          correction=falseTargetFailure?`\nA tarefa foi identificada inequivocamente pelo servidor: ID ${referencedTask!.id}, título “${referencedTask!.title}”. Use esse ID real e chame a ferramenta de proposta agora. Não peça ID nem nome ao gestor.`:"\nSua resposta anterior pediu autorização sem criar o cartão. Consulte o ID real já presente em context.activePlan e chame a ferramenta de proposta nesta resposta. Não termine com 'Posso...?' sem uma proposta validada.";
           emit({type:"activity",text:"Preparando a alteração para sua aprovação…"});
         }
         emit({type:"delta",text});
@@ -181,15 +203,17 @@ export async function POST(request: Request) {
           await tx.$queryRaw`SELECT id FROM "ConversationThread" WHERE id = ${threadId} FOR UPDATE`;
           const fresh = await tx.conversationThread.findFirst({ where: { id: threadId, companyId: auth.companyId, generationId: requestId } });
           if (!fresh || controller.signal.aborted) throw new Error("Resposta interrompida");
+          const nextWorkshop = current ? workshopFromMemory(current, nextMemory) : null;
+          await tx.conversationThread.update({ where: { id: threadId }, data: { conversationMemory: nextMemory as never, ...(nextWorkshop ? { workflowState: nextWorkshop as never } : {}) } });
           const proposal = actionDraft && proposalSourceId ? await proposeAction(tx, auth, threadId, proposalSourceId, actionDraft) : null;
           await tx.conversationMessage.create({ data: { id: assistantId, threadId, role: "ASSISTANT", content: text, metadata: { requestId, ...(resumeProposalId ? { continuationForProposalId: resumeProposalId } : {}) } } });
           await tx.conversationThread.update({ where: { id: threadId }, data: { lastMessageAt: new Date(), generationId: null, generationStartedAt: null,  } });
-          return { state: current, proposal: proposal ? proposalView(proposal) : null };
+          return { state: nextWorkshop, memory: nextMemory, proposal: proposal ? proposalView(proposal) : null };
         });
-        emit({ type: "done", state: saved.state, proposal: saved.proposal });
+        emit({ type: "done", state: saved.state, memory: saved.memory, proposal: saved.proposal });
       } catch (error) {
         const interrupted = controller.signal.aborted;
-        console.error("COO chat:", interrupted ? "interrupted" : error instanceof Error ? error.name : "failed");
+        console.error("COO chat:", interrupted ? "interrupted" : error instanceof Error ? `${error.name}: ${error.message}` : "failed");
         // Partial text remains visible and explicitly marked, but tool changes are discarded.
         if (!resumeProposalId) await prisma.conversationMessage.upsert({ where: { id: assistantId }, update: {}, create: { id: assistantId, threadId, role: "ASSISTANT", content: text || (interrupted ? "Resposta interrompida. Você pode continuar quando quiser." : "Não consegui responder agora. Sua mensagem está salva; tente novamente."), metadata: { interrupted, failed: !interrupted, requestId } } }).catch(() => undefined);
         emit({ type: interrupted ? "stopped" : "error", text: interrupted ? "Resposta interrompida. As confirmações desta resposta não foram aplicadas." : "Não foi possível concluir. A mensagem ficou salva; tente novamente." });

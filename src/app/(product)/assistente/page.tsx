@@ -9,10 +9,11 @@ import {
   startNewConversation,
 } from "@/app/(product)/assistente/actions";
 import { AssistantChat } from "@/components/assistant-chat";
-import { readWorkshop } from "@/core/coo-workshop";
+import { readConversationMemory } from "@/core/conversation-memory";
+import { redirect } from "next/navigation";
 import { activeGeneration } from "@/server/ai/chat-generation";
 import { asDiagnosticRecord } from "@/core/diagnostic-history";
-import { PLAN_THREAD_PREFIX } from "@/core/plan-thread";
+import { conversationPath } from "@/core/plan-thread";
 
 export const metadata: Metadata = { title: "COO" };
 export const dynamic = "force-dynamic";
@@ -34,10 +35,14 @@ export default async function AssistantPage({
 }) {
   const company = await getDevCompany();
   const params = await searchParams;
+  if (params.chat) {
+    const selected = await prisma.conversationThread.findFirst({ where: { id: params.chat, companyId: company.id }, select: { kind: true } });
+    if (selected?.kind === "PLAN") redirect(conversationPath("PLAN", params.chat));
+  }
 
   const [threads, diagnostic, planCandidates, selectedDiagnostic] = await Promise.all([
     prisma.conversationThread.findMany({
-      where: { companyId: company.id, id: { not: { startsWith: PLAN_THREAD_PREFIX } }, messages: { some: {} } },
+      where: { companyId: company.id, kind: "COO", messages: { some: {} } },
       orderBy: { updatedAt: "desc" },
       select: { id: true, title: true, updatedAt: true },
     }),
@@ -101,7 +106,7 @@ export default async function AssistantPage({
     : ["Escolher uma ação simples para hoje", "Encontrar um ganho rápido", "Definir o próximo passo"];
   const planOptions = plan
     ? ["Revisar o plano atual", "Escolher a ação de hoje", "Ver o que está atrasado no plano"]
-    : ["Criar um plano simples", "Organizar uma nova ação", "Transformar um problema em ação"];
+    : ["Analisar uma decisão da empresa", "Entender um problema operacional", "Conversar sobre gestão"];
   const contextOptions = diagnostic
     ? ["Revisar o diagnóstico", "Checar se o gargalo mudou", "Encontrar uma nova oportunidade"]
     : threads[0]
@@ -122,7 +127,8 @@ export default async function AssistantPage({
           messages={messages.map((message) => ({ id: message.id, role: message.role, content: message.content + (asDiagnosticRecord(message.metadata).interrupted ? "\n\n[Resposta interrompida]" : asDiagnosticRecord(message.metadata).failed ? "\n\n[Resposta não concluída]" : "") }))}
           threads={threads.map((item) => ({ id: item.id, title: item.title, updatedAt: item.updatedAt.toISOString() }))}
           currentThreadId={thread?.id ?? "new"}
-          initialWorkshop={readWorkshop(thread?.workflowState)}
+          initialWorkshop={null}
+          initialMemory={readConversationMemory(thread?.conversationMemory, "COO")}
           initialGenerationId={activeGeneration(thread?.generationId ?? null, thread?.generationStartedAt ?? null)}
           deleteAction={deleteConversation}
           renameAction={renameConversation}

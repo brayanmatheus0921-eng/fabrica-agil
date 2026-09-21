@@ -2,7 +2,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const allowedElements = [
-  "p", "strong", "em", "del", "h1", "h2", "h3", "h4", "ul", "ol", "li",
+  "p", "strong", "em", "del", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li",
   "blockquote", "code", "pre", "a", "hr", "br", "table", "thead", "tbody", "tr", "th", "td",
 ];
 
@@ -27,14 +27,16 @@ export function AssistantMarkdown({ text }: { text: string }) {
           h2: ({ children }) => <h2 className="mb-2 mt-5 text-lg font-bold leading-snug first:mt-0">{children}</h2>,
           h3: ({ children }) => <h3 className="mb-1.5 mt-4 text-base font-semibold leading-snug first:mt-0">{children}</h3>,
           h4: ({ children }) => <h4 className="mb-1.5 mt-3 text-sm font-semibold first:mt-0">{children}</h4>,
+          h5: ({ children }) => <h5 className="mb-1.5 mt-3 text-sm font-semibold first:mt-0">{children}</h5>,
+          h6: ({ children }) => <h6 className="mb-1.5 mt-3 text-sm font-semibold first:mt-0">{children}</h6>,
           p: ({ children }) => <p className="my-2 leading-7 first:mt-0 last:mb-0">{children}</p>,
           strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
           ul: ({ children }) => <ul className="my-3 list-disc space-y-1.5 pl-5 marker:text-primary">{children}</ul>,
-          ol: ({ children }) => <ol className="my-3 list-decimal space-y-1.5 pl-5 marker:font-semibold marker:text-primary">{children}</ol>,
+          ol: ({ children, start }) => <ol start={start} className="my-3 list-decimal space-y-1.5 pl-5 marker:font-semibold marker:text-primary">{children}</ol>,
           li: ({ children }) => <li className="pl-1 leading-6">{children}</li>,
           blockquote: ({ children }) => <blockquote className="my-3 border-l-2 border-primary/40 bg-surface-muted/50 px-4 py-2 text-muted">{children}</blockquote>,
           hr: () => <hr className="my-5 border-border" />,
-          a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer" className="font-medium text-primary underline decoration-primary/30 underline-offset-2 hover:decoration-primary">{children}</a>,
+          a: ({ href, children }) => href ? <a href={href} target={/^https?:\/\//i.test(href) ? "_blank" : undefined} rel="noopener noreferrer" className="font-medium text-primary underline decoration-primary/30 underline-offset-2 hover:decoration-primary">{children}</a> : <span>{children}</span>,
           pre: ({ children }) => <pre className="my-3 max-w-full overflow-x-auto rounded-xl bg-[#111a2a] p-4 text-xs leading-6 text-white">{children}</pre>,
           code: ({ className, children }) => className
             ? <code className={className}>{children}</code>

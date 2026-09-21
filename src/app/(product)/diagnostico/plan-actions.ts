@@ -19,7 +19,7 @@ export async function generateDiagnosticPlan(_state: { error: string | null }, f
     ? `Esta conversa existe somente para concluir seu plano de ação. Não criaremos ferramentas nem tarefas antes da aprovação do conjunto completo.\n\nA matriz deste diagnóstico colocou ${String(first.theme)} como o primeiro ponto de atenção, com ${Number(first.performanceScore)}/100. Isso vem das suas respostas: ${String(first.scoreReason)}\n\nEssa área ainda é o que mais atrapalha sua fábrica hoje?`
     : "Esta conversa existe somente para concluir seu plano de ação. Não criaremos ferramentas nem tarefas antes da aprovação do conjunto completo.\n\nUsando o diagnóstico como base, o que mais está atrapalhando a produção hoje?";
   await prisma.conversationThread.upsert({ where: { id }, update: {}, create: {
-    id, companyId: (await requireAuth()).companyId, title: `Plano de ação · ${diagnosis.title ?? "Diagnóstico operacional"}`,
+    id, kind: "PLAN", companyId: (await requireAuth()).companyId, title: `Plano de ação · ${diagnosis.title ?? "Diagnóstico operacional"}`,
     workflowState: newWorkshop(diagnosis.id, diagnosis.title ?? "Diagnóstico operacional") as never,
     messages: { create: { role: "ASSISTANT", content: introduction } },
   } });

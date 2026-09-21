@@ -10,7 +10,7 @@ const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.
 const base = "http://127.0.0.1:3000";
 async function main() {
   const diagnosis = await db.diagnosticSession.findFirstOrThrow({ where: { companyId: DEV_COMPANY_ID, status: "COMPLETED" }, orderBy: { completedAt: "desc" } });
-  const thread = await db.conversationThread.create({ data: { companyId: DEV_COMPANY_ID, title: "QA — Plano colaborativo (dados fictícios)", workflowState: newWorkshop(diagnosis.id, diagnosis.title!) as never } });
+  const thread = await db.conversationThread.create({ data: { companyId: DEV_COMPANY_ID, kind: "PLAN", title: "QA — Plano colaborativo (dados fictícios)", workflowState: newWorkshop(diagnosis.id, diagnosis.title!) as never } });
   console.log("QA_THREAD", thread.id);
   const messages = [
     "Sou o gestor nesta simulação com dados fictícios. Confirmo que o diagnóstico retrata hoje: ordens esperam porque descobrimos material faltante só ao iniciar. Quero entender e reduzir essas esperas, não atribuir culpa a pessoas.",

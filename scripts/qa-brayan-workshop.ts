@@ -28,7 +28,7 @@ async function main(){
   const token=randomBytes(32).toString("base64url");
   const session=await db.authSession.create({data:{userId:brayan.id,tokenHash:sessionTokenHash(token,config!),expiresAt:new Date(Date.now()+3600_000)}});
   const diagnosis=await db.diagnosticSession.create({data:{companyId,templateId:template.id,status:"COMPLETED",title:`QA retrabalho ${runId}`,completedAt:new Date(),resultSummary:"Diagnóstico sintético para testar entrevista; não representa dados da fábrica.",resultSnapshot:{source:"QA_SYNTHETIC",themes:[{themeCode:"REWORK",priorityOrder:1,answers:[{questionCode:template.questions[0].code}]}]},answers:{create:[{questionId:template.questions[0].id,value:"QA sintético: dificuldades de conferência",notes:"Exclusivamente teste técnico"}]}}});
-  const thread=await db.conversationThread.create({data:{id:planThreadId(diagnosis.id),companyId,title:`QA plano de ação ${runId}`,workflowState:newWorkshop(diagnosis.id,diagnosis.title!) as never}});
+  const thread=await db.conversationThread.create({data:{id:planThreadId(diagnosis.id),companyId,kind:"PLAN",title:`QA plano de ação ${runId}`,workflowState:newWorkshop(diagnosis.id,diagnosis.title!) as never}});
   let activeThreadId=thread.id;
   let executionThreadId:string|null=null;
   const headers={"Content-Type":"application/json","Origin":base,"Cookie":`${AUTH_COOKIE_NAME}=${token}`};
@@ -42,7 +42,7 @@ async function main(){
       const done=events.find(event=>event.type==="done");assert.ok(done,"resposta deve terminar");
       const answer=events.filter(event=>event.type==="delta").map(event=>event.text).join("");
       console.log(JSON.stringify({turn:message.slice(0,35),answered:Boolean(answer),question:/\?(?:\*{1,2}|_{1,2})?\s*$/.test(answer.trim()),proposal:done.proposal?.status??null,answerText:answer.slice(-550)}));
-      return {answer,proposal:done.proposal};
+      return {answer,proposal:done.proposal,memory:done.memory};
     }
     const first=await chat("No diagnóstico parece que manutenção pesa, mas quase nunca temos paradas de máquina. Quero investigar o problema verdadeiro antes de fazer o plano.");
     assert.equal(first.proposal,null,"primeiro relato não aprova plano");
@@ -53,6 +53,7 @@ async function main(){
     const third=await chat("Os erros de medida aparecem sobretudo no desenho antes de liberar a produção. Quero priorizar o retrabalho de medidas; a dependência de mim para conferir desenhos pode contribuir, ainda é hipótese. Brayan responde pela coordenação e o conferente registra os erros e executa a checagem. Temos 30 dias para agir. Nossa equipe pode dedicar duas horas por semana por responsável. Podemos usar o formulário da plataforma e até R$ 300 em materiais; custos exatos serão estimados antes de comprar. Quero entre três e cinco iniciativas viáveis: medir os erros, padronizar conferência, delegar a checagem e revisar semanalmente.");
     let final=third;
     if(!final.proposal)final=await chat("Confirmo: medir os erros de medida nos últimos 5 pedidos é a iniciativa principal para descobrir a base e a origem, sem adiar as ações. Padronizar a conferência, delegar a checagem e revisar semanalmente são complementares. O conferente registra os casos; Brayan coordena e estima os custos dos materiais em até 3 dias, antes de qualquer compra. Prazo total de 30 dias, duas horas por semana por pessoa e até R$ 300 de recursos. Meta inicial: reduzir em 20% a frequência de erros nos próximos pedidos comparáveis ao levantamento inicial; sem prometer ganho antes da medição. Complete as ações com passos, prova e revisão.");
+    for(let attempt=0;!final.proposal&&attempt<3;attempt++)final=await chat(final.memory?.awaitingConfirmation?"sim":"Siga com sua recomendação inicial para a decisão que falta e conclua o plano com os dados já confirmados.");
     assert.ok(final.proposal,"com acordos completos o COO deve preparar revisão final");
     assert.match(final.proposal.details.at(-1),/plano aparecerá em Projetos\/Plano/);
     assert.equal(await db.actionPlan.count({where:{companyId,baseline:{path:["threadId"],equals:thread.id}}}),0,"antes de aprovar não cria plano");

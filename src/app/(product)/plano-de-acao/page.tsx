@@ -123,7 +123,7 @@ export default async function ActionPlanPage({
   if (plan && cooPlanSchema.safeParse(plan.targetOutcome).success) {
     return <div className="space-y-6">{diagnosisHub}<CooPlanOverview plan={plan} sourceDiagnosis={typeof sourceDiagnosis === "string" ? sourceDiagnosis : undefined} threadId={typeof baseline.threadId === "string" ? baseline.threadId : undefined} demo={baseline.demo === true} error={params.error} approval={
       <form action={approveActionPlan}>
-        {!readyToApprove ? <p className="mb-3 text-sm text-amber-800">Você reabriu uma etapa. Termine a revisão com o COO antes de aprovar.</p> : null}
+        {!readyToApprove ? <p className="mb-3 text-sm text-amber-800">Você reabriu uma etapa. Termine a revisão no Chat do Plano antes de aprovar.</p> : null}
         <input type="hidden" name="planId" value={plan.id}/>
         <button disabled={!readyToApprove} className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-primary px-5 py-3 text-sm font-medium text-white disabled:opacity-40">Aprovar e começar<ArrowRight aria-hidden="true" className="size-4"/></button>
       </form>
@@ -142,7 +142,7 @@ export default async function ActionPlanPage({
         description={
           plan?.status === "DRAFT" ? "Revise as prioridades e as tarefas abaixo. A execução só começa após sua aprovação." : plan
             ? "Faça uma tarefa por vez. A Fábrica Ágil mostra o que entregar e acompanha o avanço."
-            : planningThread ? "Seu plano está sendo construído com o COO. Projetos e tarefas aparecerão depois da aprovação final."
+            : planningThread ? "Seu plano está sendo construído no Chat do Plano. Projetos e tarefas aparecerão depois da aprovação final."
             : "Seu plano será criado a partir do método recomendado, sem você precisar montar tarefas do zero."
         }
         actions={
@@ -180,7 +180,7 @@ export default async function ActionPlanPage({
               Plano e tarefas pendentes de aprovação
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">
-              {plan.recommendation ? `Montado a partir de ${plan.recommendation.methodVersion.method.name}. ` : "O COO montou este plano usando o diagnóstico escolhido e a biblioteca de métodos. "}
+              {plan.recommendation ? `Montado a partir de ${plan.recommendation.methodVersion.method.name}. ` : "O planejador montou este plano usando o diagnóstico escolhido e a biblioteca de métodos. "}
               Confira as prioridades e tarefas. Nada começa até você aprovar. Os prazos contam a partir da aprovação.
             </p>
             <div className="mt-6 grid gap-3">
@@ -194,7 +194,7 @@ export default async function ActionPlanPage({
             <p className="mt-5 text-xs text-muted">Ao aprovar, este será o plano ativo; o plano anterior, se houver, ficará pausado. Até 3 tarefas serão liberadas por vez.</p>
             <Link href={`/tarefas?plan=${plan.id}`} className="mt-4 inline-flex text-sm font-bold underline">Ver tarefas pendentes</Link>
             <form action={approveActionPlan} className="mt-7">
-              {!readyToApprove ? <p className="mb-3 text-sm text-amber-800">Você reabriu uma etapa. Termine a revisão com o COO antes de aprovar este rascunho.</p> : null}
+              {!readyToApprove ? <p className="mb-3 text-sm text-amber-800">Você reabriu uma etapa. Termine a revisão no Chat do Plano antes de aprovar este rascunho.</p> : null}
               <input type="hidden" name="planId" value={plan.id} />
               <button disabled={!readyToApprove} className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3.5 text-sm font-bold text-white disabled:opacity-40">
                 Aprovar e começar
@@ -342,7 +342,7 @@ export default async function ActionPlanPage({
             <h2 className="mt-5 text-xl font-bold">
               {recommendation
                 ? "A recomendação está pronta"
-                : planningThread ? "Seu plano está em construção com o COO"
+                : planningThread ? "Seu plano está em construção no Chat do Plano"
                 : completedDiagnosis ? "Diagnóstico concluído. Hora de montar o plano"
                 : "Primeiro conclua o diagnóstico"}
             </h2>
@@ -350,7 +350,7 @@ export default async function ActionPlanPage({
               {recommendation
                 ? "Crie o plano recomendado e receba as tarefas na ordem certa."
                 : planningThread ? "Continue a conversa para definir 3 a 5 iniciativas viáveis, responsáveis, prazos, recursos e custos. O plano e as tarefas serão liberados após sua aprovação do conjunto completo."
-                : completedDiagnosis ? "Converse com o COO para transformar o diagnóstico em iniciativas, 5W2H e tarefas executáveis."
+                : completedDiagnosis ? "Converse com o planejador para transformar o diagnóstico em iniciativas, 5W2H e tarefas executáveis."
                 : "A Fábrica Ágil precisa entender o gargalo antes de sugerir ações."}
             </p>
             {recommendation ? (
@@ -370,7 +370,7 @@ export default async function ActionPlanPage({
               </form>
             ) : planningThread || completedDiagnosis ? (
               <Link href={planningThread ? `/plano-de-acao/construir?chat=${planningThread.id}` : "/plano-de-acao"} className="mt-6 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-bold text-white">
-                Continuar plano com o COO<ArrowRight aria-hidden="true" className="size-4" />
+                Abrir Chat do Plano<ArrowRight aria-hidden="true" className="size-4" />
               </Link>
             ) : (
               <Link

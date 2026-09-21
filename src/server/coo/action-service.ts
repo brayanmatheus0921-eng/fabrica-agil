@@ -10,6 +10,7 @@ import { readExecutionGuide, validateFormValues, validateProductionEvent } from 
 import { readRecords, eventsFrom } from "@/core/task-records";
 import { assertApprovedPlanForAction } from "@/core/coo-mode";
 import { isDedicatedPlanThread } from "@/core/plan-thread";
+import { readConversationMemory, resolveShortConfirmation } from "@/core/conversation-memory";
 
 type DB = Prisma.TransactionClient;
 export type ActionActor = { companyId: string; userId: string; membershipId: string };
@@ -41,6 +42,8 @@ async function inspect(db: DB, actor: ActionActor, threadId: string, a: CooActio
   const companyId = actor.companyId;
   const thread = required(await db.conversationThread.findFirst({ where: { id: threadId, companyId } }), "Conversa");
   const workflow=readWorkshop(thread.workflowState);
+  if (thread.kind === "COO" && a.type.startsWith("workshop.")) throw Error("Construa o plano na conversa exclusiva do Plano.");
+  if (thread.kind === "PLAN" && a.type !== "workshop.patch") throw Error("Esta conversa é exclusiva do planejamento.");
   assertCooWorkflow(workflow,a);
   if (["project.create", "task.create", "artifact.save"].includes(a.type)) {
     const hasActivePlan = Boolean(await db.actionPlan.findFirst({ where: { companyId, status: "ACTIVE" }, select: { id: true } }));
@@ -96,9 +99,12 @@ async function inspect(db: DB, actor: ActionActor, threadId: string, a: CooActio
     case "workshop.patch": {
       const state = required(readWorkshop(thread.workflowState), "Plano em construção");
       const diagnosis = required(await db.diagnosticSession.findFirst({ where: { id: state.diagnosticId, companyId, status: "COMPLETED" }, include: { answers: { include: { question: true } } } }), "Diagnóstico");
-      const messages = await db.conversationMessage.findMany({ where: { threadId, role: "USER" }, select: { id: true, content: true } });
+      const messages = await db.conversationMessage.findMany({ where: { threadId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true, content: true, role: true } });
+      const memory = readConversationMemory(thread.conversationMemory, "PLAN");
+      const confirmation = resolveShortConfirmation(memory, messages);
+      const confirmedReplies = [...memory.decisions.map(item => item.sourceMessageId), ...(confirmation ? [confirmation.sourceMessageId] : [])];
       const methods = await db.improvementMethod.findMany({ where: { status: "ACTIVE", versions: { some: { publishedAt: { not: null } } } }, select: { code: true } });
-      applyWorkshopPatch(state, a.patch, messages, diagnosis.answers.map(r => r.question.code), methods.map(m => m.code));
+      applyWorkshopPatch(state, a.patch, messages.filter(row => row.role === "USER"), diagnosis.answers.map(r => r.question.code), methods.map(m => m.code), confirmedReplies);
       return { ...revision, diagnosis, project: state.planId ? await plan(state.planId) : null };
     }
     case "artifact.save": {

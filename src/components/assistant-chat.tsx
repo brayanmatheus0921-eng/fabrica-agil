@@ -3,14 +3,15 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowDown, ArrowUpRight, Files, History, ListChecks, MoreHorizontal, PanelLeftOpen, Pencil, Plus, RefreshCw, Target, Trash2, X } from "lucide-react";
-import { ReadingDetails } from "@/components/reading-layout";
+import { ConversationRecord } from "./conversation-record";
+import { emptyConversationMemory, type ConversationMemory } from "@/core/conversation-memory";
 import { AssistantProposals } from "@/components/assistant-proposals";
 import { approvalIntent, type CooProposalView } from "@/core/coo-actions";
 import { AssistantComposer } from "@/components/assistant-composer";
 import { ArtifactWorkspace } from "@/components/artifact-workspace";
 import { AssistantMarkdown } from "@/components/assistant-markdown";
 import { notifyCompanyDataChanged } from "@/components/company-data-sync";
-import { STAGE_LABELS, WORKSHOP_STAGES, type WorkshopState, type WorkshopStage } from "@/core/coo-workshop";
+import { STAGE_LABELS, type WorkshopState } from "@/core/coo-workshop";
 
 type Message = { id: string; role: string; content: string };
 
@@ -24,20 +25,22 @@ function readDesktopHistory() {
   return window.matchMedia(desktopHistoryQuery).matches;
 }
 
-function ThinkingStatus({ activity }: { activity: string }) {
+function ThinkingStatus({ activity, planning }: { activity: string; planning: boolean }) {
   return <div className="flex max-w-xl items-center gap-2 py-1 text-xs text-muted" role="status" aria-live="polite">
     <span aria-hidden="true" className="inline-flex items-center gap-1">{[0,1,2].map(i=><span key={i} className="size-1.5 animate-bounce rounded-full bg-primary motion-reduce:animate-none" style={{animationDelay:`${i*180}ms`}} />)}</span>
-    <span>COO analisando · {activity}</span>
+    <span>{planning ? "Planejador" : "COO"} analisando · {activity}</span>
   </div>;
 }
 
-export function AssistantChat({ messages: initialMessages, threads, currentThreadId, initialWorkshop, initialGenerationId, deleteAction, renameAction, newChatAction, disabled, defaultValue, companyName, hasDiagnostic, hasPlan, suggestions, error, planningWorkspace = false }: {
+export function AssistantChat({ messages: initialMessages, threads, currentThreadId, initialWorkshop, initialGenerationId, deleteAction, renameAction, newChatAction, disabled, defaultValue, suggestions, error, planningWorkspace = false, initialMemory }: {
   messages: Message[]; threads: Array<{ id: string; title: string; updatedAt: string }>; currentThreadId: string;
-  initialWorkshop: WorkshopState | null; initialGenerationId: string | null;
+  initialMemory?: ConversationMemory; initialWorkshop: WorkshopState | null; initialGenerationId: string | null;
   deleteAction: (form: FormData) => void | Promise<void>; renameAction: (form: FormData) => void | Promise<void>; newChatAction: (form: FormData) => void | Promise<void>;
   disabled?: boolean; defaultValue?: string; companyName: string; hasDiagnostic: boolean; hasPlan: boolean; suggestions: Array<{ label: string; kind: "task" | "review" | "diagnostic" }>; error?: string; planningWorkspace?: boolean;
 }) {
   const router = useRouter();
+  const [memory, setMemory] = useState(initialMemory ?? emptyConversationMemory(planningWorkspace ? "PLAN" : "COO"));
+  const [recordPanel, setRecordPanel] = useState(false);
   const [messages, setMessages] = useState(initialMessages), [draft, setDraft] = useState(defaultValue ?? "");
   const [activeThreadId, setActiveThreadId] = useState(currentThreadId);
   const activeThreadIdRef = useRef(currentThreadId);
@@ -102,7 +105,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
     let received="",finished=false;
     const flush=()=>{if(received)setMessages(old=>old.some(m=>m.id===assistantId)?old.map(m=>m.id===assistantId?{...m,content:received}:m):[...old,{id:assistantId,role:"ASSISTANT",content:received}]);};
     try {
-      const response=await fetch("/api/assistant/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({threadId:proposal.threadId,requestId:id,resumeProposalId:proposal.id}),signal:controller.signal});
+      const response=await fetch("/api/assistant/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({threadId:proposal.threadId,workspace:planningWorkspace ? "PLAN" : "COO",requestId:id,resumeProposalId:proposal.id}),signal:controller.signal});
       if(!response.ok){const data=await response.json().catch(()=>({}));throw Error(data.error??"Não foi possível continuar o plano.");}
       if(!response.body)throw Error("Conexão sem resposta.");
       const reader=response.body.getReader(),decoder=new TextDecoder();let buffer="";
@@ -111,8 +114,8 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
           const event=JSON.parse(line);
           if(event.type==="activity")setActivity(event.text);
           if(event.type==="delta"){received+=event.text;setActivity("Respondendo…");flush();}
-          if(event.type==="done"){finished=true;setState(event.state);setProposalRefresh(v=>v+1);}
-          if(event.type==="error"||event.type==="stopped"){finished=true;received="";setMessages(old=>old.filter(m=>m.id!==assistantId));setNotice("A aprovação foi salva. Peça ao COO para continuar.");}
+          if(event.type==="done"){finished=true;setState(planningWorkspace ? event.state : null); if(event.memory)setMemory(event.memory);setProposalRefresh(v=>v+1);}
+          if(event.type==="error"||event.type==="stopped"){finished=true;received="";setMessages(old=>old.filter(m=>m.id!==assistantId));setNotice(planningWorkspace ? "A aprovação foi salva. Continue com o planejador." : "A aprovação foi salva. Peça ao COO para continuar.");}
         }
       }
       if(!finished)throw Error("A conexão foi interrompida. Reabra a conversa para conferir a próxima pergunta.");
@@ -150,7 +153,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
           const approvalMessageId=crypto.randomUUID();readingAnchor.current=approvalMessageId;
           setMessages(old=>[...old,{id:approvalMessageId,role:"USER",content:text},{id:crypto.randomUUID(),role:"ASSISTANT",content:answer}]);
           const fresh = await fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadIdRef.current)}`).then(r=>r.json());
-          setState(fresh.workshop); setProposalRefresh(v=>v+1);setCanvasRefresh(v=>v+1);router.refresh();
+          setState(planningWorkspace ? fresh.workshop : null); if(fresh.memory)setMemory(fresh.memory); setProposalRefresh(v=>v+1);setCanvasRefresh(v=>v+1);router.refresh();
           busyRef.current=false;setBusy(false);setActivity("");if(p.status==="APPLIED"){notifyCompanyDataChanged();await resumeInterview(p);}return;
         }
       } catch(e) {
@@ -166,7 +169,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
     let received = "", frame: ReturnType<typeof setTimeout> | null = null, finished = false, ack = false;
     const flush = () => { if (frame) clearTimeout(frame); frame = null; if (received) setMessages(old => old.some(m => m.id === assistantId) ? old.map(m => m.id === assistantId ? { ...m, content: received } : m) : [...old, { id: assistantId, role: "ASSISTANT", content: received }]); };
     try {
-      const response = await fetch("/api/assistant/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ threadId: activeThreadIdRef.current, requestId: id, message: text }), signal: controller.signal });
+      const response = await fetch("/api/assistant/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ threadId: activeThreadIdRef.current, workspace: planningWorkspace ? "PLAN" : "COO", requestId: id, message: text }), signal: controller.signal });
       if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error ?? "Não foi possível enviar. Atualize a página e tente novamente."); }
       if (!response.body) throw new Error("Conexão sem resposta.");
       const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = "";
@@ -180,7 +183,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
           if (event.type === "ack") { ack = true; setActivity("Mensagem salva. Consultando o contexto…"); if(event.userId)setMessages(old=>old.map(m=>m.id===`user-${id}`?{...m,id:event.userId}:m)); if (event.threadId && event.threadId !== activeThreadIdRef.current) { activeThreadIdRef.current = event.threadId; setActiveThreadId(event.threadId); const url = new URL(window.location.href); url.searchParams.set("chat", event.threadId); url.searchParams.delete("pergunta"); window.history.replaceState(null, "", url); } }
           if (event.type === "activity") setActivity(event.text);
           if (event.type === "delta") { received += event.text; setActivity("Respondendo…"); if (!frame) frame = setTimeout(flush, 40); }
-          if (event.type === "done") { setProposalRefresh(v=>v+1); finished = true; setState(event.state); if (event.artifact) { setCanvasRefresh(v => v + 1); setOpenArtifactId(event.artifact.id); setCanvasPanel(true); setPanel(false); setNotice(event.artifact.operation === "REUSE" ? `Ferramenta reutilizada: ${event.artifact.title}` : event.artifact.operation === "REPLACE" ? `Ferramenta atualizada: ${event.artifact.title}` : `Ferramenta criada: ${event.artifact.title}`); } }
+          if (event.type === "done") { setProposalRefresh(v=>v+1); finished = true; setState(planningWorkspace ? event.state : null); if(event.memory)setMemory(event.memory); if (event.artifact) { setCanvasRefresh(v => v + 1); setOpenArtifactId(event.artifact.id); setCanvasPanel(true); setPanel(false); setNotice(event.artifact.operation === "REUSE" ? `Ferramenta reutilizada: ${event.artifact.title}` : event.artifact.operation === "REPLACE" ? `Ferramenta atualizada: ${event.artifact.title}` : `Ferramenta criada: ${event.artifact.title}`); } }
           if (event.type === "error" || event.type === "stopped") { finished = true; setNotice(event.text); }
         }
       }
@@ -197,14 +200,6 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
     }
   }
 
-  async function revisit(stage: WorkshopStage) {
-    if (busyRef.current) return;
-    busyRef.current = true; setBusy(true);
-    try { const response = await fetch("/api/assistant/workshop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ threadId: currentThreadId, stage }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error); setState(data.state); setNotice(`Etapa reaberta: ${STAGE_LABELS[stage]}. Conte ao consultor o que deseja revisar.`); }
-    catch (e) { setNotice(e instanceof Error ? e.message : "Não foi possível reabrir."); }
-    finally { busyRef.current = false; setBusy(false); }
-  }
-
   function openThread(id: string) {
     if (busyRef.current || switchingChat || id === activeThreadIdRef.current) return;
     setSwitchingChat(true);
@@ -212,29 +207,31 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
   }
 
   const attachedSources=new Set(messages.filter((m,index)=>m.role==="USER"&&messages[index+1]?.role==="ASSISTANT").map(m=>m.id));
-  const onProposalApplied=(proposal:CooProposalView)=>{notifyCompanyDataChanged();setNotice("Ação aplicada com sua aprovação.");setCanvasRefresh(v=>v+1);const approvalId=crypto.randomUUID();readingAnchor.current=approvalId;follow.current=false;setMessages(old=>[...old,{id:approvalId,role:"USER",content:`Aprovei: ${proposal.summary}`},{id:crypto.randomUUID(),role:"ASSISTANT",content:proposal.result?.message??"Ação aplicada."}]);router.refresh();fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadId)}`).then(r=>r.json()).then(data=>{if(data.workshop!==undefined)setState(data.workshop);}).catch(()=>{});void resumeInterview(proposal);};
+  const onProposalApplied=(proposal:CooProposalView)=>{notifyCompanyDataChanged();setNotice("Ação aplicada com sua aprovação.");setCanvasRefresh(v=>v+1);const approvalId=crypto.randomUUID();readingAnchor.current=approvalId;follow.current=false;setMessages(old=>[...old,{id:approvalId,role:"USER",content:`Aprovei: ${proposal.summary}`},{id:crypto.randomUUID(),role:"ASSISTANT",content:proposal.result?.message??"Ação aplicada."}]);router.refresh();fetch(`/api/assistant/proposals?threadId=${encodeURIComponent(activeThreadId)}`).then(r=>r.json()).then(data=>{if(data.workshop!==undefined)setState(data.workshop);if(data.memory)setMemory(data.memory);}).catch(()=>{});void resumeInterview(proposal);};
   const onProposalChanged=(proposal:CooProposalView)=>setProposals(old=>old.map(p=>p.id===proposal.id?proposal:p));
   const onProposalAdjust=(text:string)=>{setDraft(text);document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Mensagem para o consultor"]')?.focus();};
-  const dedicatedPlanning=Boolean(state);
+  const dedicatedPlanning=planningWorkspace;
 
   return <div className="coo-chat relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-white">
     <section className={`assistant-chat-pane relative flex min-w-0 flex-1 flex-col transition-[opacity,transform] duration-200 ease-out ${switchingChat ? "translate-y-1 opacity-0" : "translate-y-0 opacity-100"}`}>
       <header className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-3 sm:px-6">
         <div className="flex min-w-0 items-center gap-3"><button type="button" onClick={() => { if (canvasDirty.current && !window.confirm("Descartar alterações não salvas?")) return; canvasDirty.current = false; setCanvasPanel(false); setPanel(!panel); }} aria-expanded={panel} aria-controls="assistant-details" aria-label="Abrir ou fechar histórico de conversas" title="Histórico de conversas" className="grid size-10 shrink-0 place-items-center rounded-xl border transition hover:bg-surface-muted"><PanelLeftOpen className={`size-4 transition-transform duration-200 ${panel ? "rotate-180" : ""}`} /></button><div className="min-w-0"><h1 className="text-sm font-semibold">{dedicatedPlanning ? "Plano de ação" : "COO"}</h1><p className="truncate text-xs text-muted">{state ? `Somente planejamento · ${STAGE_LABELS[state.stage]}` : "Seu consultor de operações"}</p></div></div>
-        {!dedicatedPlanning ? <div className="flex shrink-0 gap-2"><button type="button" disabled={busy} onClick={() => { if (canvasPanel && canvasDirty.current && !window.confirm("Descartar alterações não salvas?")) return; canvasDirty.current = false; setCanvasPanel(v => !v); setPanel(false); }} aria-expanded={canvasPanel} aria-controls="assistant-canvas" className="inline-flex min-h-10 items-center gap-2 rounded-lg border px-3 text-xs font-semibold transition hover:bg-surface-muted disabled:opacity-50"><Files className="size-4"/><span className="hidden sm:inline">Ferramentas e arquivos</span><span className="sm:hidden">Ferramentas</span></button></div> : <span className="rounded-full bg-accent px-3 py-1.5 text-[11px] font-semibold text-primary">Plano primeiro</span>}
+        <button type="button" role="tab" aria-selected={recordPanel} aria-controls="conversation-record" onClick={() => { setRecordPanel(!recordPanel); setCanvasPanel(false); setPanel(false); }} className="ml-auto min-h-10 rounded-lg border px-3 text-xs font-semibold">Registro</button>
+        {!dedicatedPlanning ? <div className="flex shrink-0 gap-2"><button type="button" disabled={busy} onClick={() => { if (canvasPanel && canvasDirty.current && !window.confirm("Descartar alterações não salvas?")) return; canvasDirty.current = false; setCanvasPanel(v => !v); setRecordPanel(false); setPanel(false); }} aria-expanded={canvasPanel} aria-controls="assistant-canvas" className="inline-flex min-h-10 items-center gap-2 rounded-lg border px-3 text-xs font-semibold transition hover:bg-surface-muted disabled:opacity-50"><Files className="size-4"/><span className="hidden sm:inline">Ferramentas e arquivos</span><span className="sm:hidden">Ferramentas</span></button></div> : <span className="rounded-full bg-accent px-3 py-1.5 text-[11px] font-semibold text-primary">Plano primeiro</span>}
       </header>
       {notice ? <div role="status" className="flex shrink-0 items-center justify-between gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900"><span>{notice}</span><button aria-label="Fechar aviso" onClick={() => setNotice("")}><X className="size-4" /></button></div> : null}
       {state?.stage === "REVIEW" && state.planId ? <a href={`/plano-de-acao?id=${state.planId}`} className="shrink-0 border-b bg-accent px-4 py-3 text-sm font-semibold">Plano pronto para sua revisão → Revisar e aprovar</a> : null}
       <div ref={scroll} data-empty={!messages.length} onScroll={() => { const node = scroll.current; if (node) { follow.current = node.scrollHeight - node.scrollTop - node.clientHeight < 90; setAway(!follow.current); } }} className="coo-conversation min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-8">
         <div className="mx-auto flex max-w-3xl flex-col gap-6">
-          {!messages.length ? <div className="coo-welcome py-8 text-center sm:py-12"><p className="coo-welcome-title">O que vamos fazer hoje?</p><p className="mt-2 text-sm text-muted">Converse com seu COO. Da decisão à execução, com sua aprovação.</p><div className="mx-auto mt-6 grid max-w-md gap-2 text-left">{suggestions.slice(0, 3).map((suggestion) => { const Icon = suggestion.kind === "task" ? ListChecks : suggestion.kind === "review" ? RefreshCw : Target; return <button key={`${suggestion.kind}-${suggestion.label}`} type="button" onClick={() => setDraft(suggestion.label)} className="group flex min-h-11 items-center gap-3 rounded-xl border bg-surface px-3.5 py-2.5 text-[13px] leading-5 transition hover:border-primary/35 hover:bg-surface-muted"><Icon className="size-4 shrink-0 text-primary" /><span className="min-w-0 flex-1 truncate">{suggestion.label}</span><ArrowUpRight className="size-3.5 shrink-0 text-muted transition group-hover:text-primary" /></button>; })}</div></div> : messages.map((m, index) => <div key={m.id} className="contents"><article data-message-id={m.id} aria-label={m.role === "USER" ? "Sua mensagem" : "Resposta do consultor"} className={m.role === "USER" ? "ml-auto max-w-[90%] rounded-2xl bg-surface-muted px-4 py-3 text-sm leading-6" : "max-w-full text-sm leading-7"}><AssistantMarkdown text={m.content} /></article>{m.role==="ASSISTANT"&&messages[index-1]?.role==="USER"?<AssistantProposals rows={proposals.filter(p=>p.sourceMessageId===messages[index-1].id)} busy={busy} onAdjust={onProposalAdjust} onApplied={onProposalApplied} onChanged={onProposalChanged}/>:null}</div>)}
+          {!messages.length ? <div className="coo-welcome py-8 text-center sm:py-12"><p className="coo-welcome-title">{planningWorkspace ? "Vamos construir seu plano" : "O que vamos fazer hoje?"}</p><p className="mt-2 text-sm text-muted">{planningWorkspace ? "Vou analisar o diagnóstico, sugerir caminhos e fazer uma pergunta por vez." : "Converse com seu COO. Da decisão à execução, com sua aprovação."}</p><div className="mx-auto mt-6 grid max-w-md gap-2 text-left">{suggestions.slice(0, 3).map((suggestion) => { const Icon = suggestion.kind === "task" ? ListChecks : suggestion.kind === "review" ? RefreshCw : Target; return <button key={`${suggestion.kind}-${suggestion.label}`} type="button" onClick={() => setDraft(suggestion.label)} className="group flex min-h-11 items-center gap-3 rounded-xl border bg-surface px-3.5 py-2.5 text-[13px] leading-5 transition hover:border-primary/35 hover:bg-surface-muted"><Icon className="size-4 shrink-0 text-primary" /><span className="min-w-0 flex-1 truncate">{suggestion.label}</span><ArrowUpRight className="size-3.5 shrink-0 text-muted transition group-hover:text-primary" /></button>; })}</div></div> : messages.map((m, index) => <div key={m.id} className="contents"><article data-message-id={m.id} aria-label={m.role === "USER" ? "Sua mensagem" : "Resposta do consultor"} className={m.role === "USER" ? "ml-auto max-w-[90%] rounded-2xl bg-surface-muted px-4 py-3 text-sm leading-6" : "max-w-full text-sm leading-7"}><AssistantMarkdown text={m.content} /></article>{m.role==="ASSISTANT"&&messages[index-1]?.role==="USER"?<AssistantProposals rows={proposals.filter(p=>p.sourceMessageId===messages[index-1].id)} busy={busy} onAdjust={onProposalAdjust} onApplied={onProposalApplied} onChanged={onProposalChanged}/>:null}</div>)}
           {proposals.some(p=>p.status==="PENDING"&&!attachedSources.has(p.sourceMessageId))?<AssistantProposals rows={proposals.filter(p=>p.status==="PENDING"&&!attachedSources.has(p.sourceMessageId))} busy={busy} onAdjust={onProposalAdjust} onApplied={onProposalApplied} onChanged={onProposalChanged}/>:null}
-          {busy && activity ? <ThinkingStatus activity={activity} /> : null}
+          {busy && activity ? <ThinkingStatus activity={activity} planning={planningWorkspace} /> : null}
         </div>
       </div>
       {away ? <button onClick={() => { follow.current = true; scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: "smooth" }); }} className="absolute bottom-36 right-4 z-10 rounded-full border bg-white p-2 shadow" aria-label="Ir para última mensagem" title="Nova mensagem abaixo"><ArrowDown className="size-4" /></button> : null}
-      <div className="shrink-0 bg-white px-3 pb-[max(12px,env(safe-area-inset-bottom))] pt-3 sm:px-6"><AssistantComposer value={draft} onChange={setDraft} onSend={send} onStop={stop} busy={busy} stopping={stopping} disabled={disabled} /></div>
+      <div className="shrink-0 bg-white px-3 pb-[max(12px,env(safe-area-inset-bottom))] pt-3 sm:px-6"><AssistantComposer value={draft} onChange={setDraft} onSend={send} onStop={stop} busy={busy} stopping={stopping} disabled={disabled} planning={planningWorkspace} /></div>
     </section>
+    {recordPanel ? <aside id="conversation-record" role="tabpanel" aria-label="Registro da conversa" className="absolute inset-y-0 right-0 z-20 w-full overflow-y-auto border-l bg-white p-5 shadow-xl sm:w-[min(90%,420px)] xl:static xl:shrink-0 xl:shadow-none"><div className="mb-5 flex items-center justify-between"><h2 className="font-semibold">Registro · {planningWorkspace ? "Plano" : "COO"}</h2><button aria-label="Fechar registro" onClick={() => setRecordPanel(false)} className="min-h-10 px-3">Voltar à conversa</button></div><ConversationRecord memory={memory} planning={planningWorkspace} busy={busy} onCorrect={() => { setDraft("Correção do Registro: "); setRecordPanel(false); document.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }} /></aside> : null}
     {canvasPanel && !dedicatedPlanning ? <aside id="assistant-canvas" aria-label="Canvas do COO" className="absolute inset-y-0 right-0 z-20 w-full overflow-y-auto border-l bg-white p-4 shadow-xl sm:w-[min(90%,640px)] xl:static xl:w-[48%] xl:shrink-0 xl:shadow-none"><button aria-label="Fechar Canvas" className="mb-4 ml-auto flex min-h-10 items-center gap-2 rounded-lg border px-3 text-xs" onClick={() => { if (canvasDirty.current && !window.confirm("Descartar alterações não salvas?")) return; canvasDirty.current = false; setCanvasPanel(false); }}>Voltar à conversa<X className="size-4"/></button><ArtifactWorkspace threadId={activeThreadId} refreshKey={canvasRefresh} openArtifactId={openArtifactId} onDirtyChange={value => { canvasDirty.current = value; }} /></aside> : null}
     <aside id="assistant-details" aria-label="Histórico de conversas" aria-hidden={!panel} className={`absolute inset-y-0 left-0 z-20 flex w-[min(90%,320px)] flex-col overflow-hidden bg-white shadow-xl transition-[transform,opacity,width] duration-300 ease-out lg:order-first lg:static lg:shrink-0 lg:shadow-none ${panel ? "translate-x-0 border-r opacity-100 lg:w-[292px]" : "pointer-events-none -translate-x-full border-r opacity-0 lg:w-0 lg:translate-x-0 lg:border-r-0"}`}>
       <div className="flex h-full w-[min(90vw,320px)] shrink-0 flex-col lg:w-[292px]">
@@ -243,16 +240,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
         {planningWorkspace ? <Link href="/plano-de-acao" className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border bg-surface px-3 text-xs font-bold transition hover:bg-surface-muted">Voltar aos diagnósticos</Link> : <form action={newChatAction}><button disabled={busy} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border bg-surface px-3 text-xs font-bold transition hover:bg-surface-muted disabled:opacity-40"><Plus className="size-4"/>Nova conversa</button></form>}
         <p className="mt-5 px-1 text-[9px] font-black uppercase tracking-[0.18em] text-muted">{planningWorkspace ? "Planos por diagnóstico" : "Histórico"}</p>
         <div className="mt-2 space-y-1.5">{threads.map(t => <div key={t.id} className={`group relative flex min-h-11 items-center gap-1 rounded-xl border p-2 pl-3 transition-colors ${t.id === currentThreadId ? "border-primary/35 bg-accent-warm" : "bg-surface hover:bg-surface-muted"}`}><button type="button" aria-current={t.id === currentThreadId ? "page" : undefined} disabled={busy || switchingChat} onClick={() => openThread(t.id)} className="min-w-0 flex-1 truncate text-left text-xs font-bold disabled:opacity-50">{t.title}</button><details className="group/menu relative shrink-0"><summary aria-label={`Opções da conversa ${t.title}`} title="Opções" className="grid size-8 cursor-pointer list-none place-items-center rounded-lg text-muted transition hover:bg-white hover:text-foreground [&::-webkit-details-marker]:hidden"><MoreHorizontal className="size-4" /></summary><div className="absolute right-0 top-9 z-30 w-48 overflow-hidden rounded-xl border bg-white p-1.5 shadow-xl"><details className="group/edit"><summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 rounded-lg px-2.5 text-xs font-semibold hover:bg-surface-muted [&::-webkit-details-marker]:hidden"><Pencil className="size-3.5" />Editar nome</summary><form action={renameAction} className="mt-1 border-t p-2"><input type="hidden" name="threadId" value={t.id} /><label className="text-[10px] font-semibold text-muted">Nome da conversa<input name="title" defaultValue={t.title} maxLength={72} required className="mt-1 w-full rounded-lg border bg-white px-2 py-1.5 text-xs outline-none focus:border-primary" /></label><button disabled={busy} className="mt-2 min-h-8 w-full rounded-lg bg-primary px-2 text-xs font-bold text-white disabled:opacity-40">Salvar nome</button></form></details><form action={deleteAction} className="mt-1 border-t pt-1"><input type="hidden" name="threadId" value={t.id} /><button disabled={busy} className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-30"><Trash2 className="size-3.5" />Excluir conversa</button></form></div></details></div>)}</div>
-        <details className="mt-5 rounded-xl border bg-surface">
-          <summary className="cursor-pointer list-none px-3 py-3 text-xs font-bold [&::-webkit-details-marker]:hidden">Contexto e etapas do plano</summary>
-          <div className="border-t p-3">
-            <p className="text-xs leading-5 text-muted">{companyName}<br />{hasDiagnostic ? "Diagnóstico salvo" : "Sem diagnóstico"} · {hasPlan ? "Plano ativo" : "Plano ainda não aprovado"}</p>
-            {state ? <section className="mt-4"><h3 className="text-xs font-semibold">Etapas do plano</h3><ReadingDetails title="Resumo do que combinamos" className="mt-3"><p className="text-sm leading-6 text-muted">{state.summary}</p></ReadingDetails><ol className="mt-3 space-y-1">{WORKSHOP_STAGES.map((stage, index) => <li key={stage}><button disabled={busy || index > state.furthestStage || index >= 5 || state.stage === "FOLLOW_UP"} onClick={() => revisit(stage)} className={`w-full rounded-lg px-2 py-2 text-left text-xs disabled:cursor-default ${stage === state.stage ? "bg-accent font-bold" : "disabled:text-muted"}`}>{index + 1}. {STAGE_LABELS[stage]}{stage === state.stage ? " · atual" : index <= state.furthestStage && index < 5 ? " · revisar" : ""}</button></li>)}</ol>
-              {state.decision ? <p className="mt-3 text-xs"><strong>Prioridade combinada:</strong> {state.decision.primaryTitle}<br />{state.decision.reason}</p> : null}
-              <details className="mt-3 text-xs"><summary className="cursor-pointer font-bold">Informações e revisões salvas</summary><p className="mt-2 font-bold">Confirmado pelo gestor</p>{state.confirmedFacts.map((f,i) => <p key={i} className="mt-1">• {f.statement}</p>)}<p className="mt-2 font-bold">Hipóteses, ainda não comprovadas</p>{state.hypotheses.map((h,i) => <p key={i}>{h}</p>)}{state.history.map((h,i) => <p key={i} className="mt-2 border-t pt-2">Revisão {h.revision} · {STAGE_LABELS[h.stage]}<br />{h.summary}</p>)}</details>
-            </section> : null}
-          </div>
-        </details>
+
       </div>
       </div>
     </aside>

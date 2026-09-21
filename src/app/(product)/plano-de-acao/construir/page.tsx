@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { AssistantChat } from "@/components/assistant-chat";
 import { asDiagnosticRecord } from "@/core/diagnostic-history";
 import { readWorkshop } from "@/core/coo-workshop";
-import { PLAN_THREAD_PREFIX } from "@/core/plan-thread";
+import { readConversationMemory } from "@/core/conversation-memory";
 import { integrationStatus } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 import { activeGeneration } from "@/server/ai/chat-generation";
@@ -16,16 +16,16 @@ export const dynamic = "force-dynamic";
 export default async function BuildActionPlanPage({ searchParams }: { searchParams: Promise<{ chat?: string; error?: string }> }) {
   const company = await getDevCompany();
   const params = await searchParams;
-  if (!params.chat?.startsWith(PLAN_THREAD_PREFIX)) redirect("/plano-de-acao");
+  if (!params.chat) redirect("/plano-de-acao");
 
   const [threads, thread, activePlan] = await Promise.all([
     prisma.conversationThread.findMany({
-      where: { companyId: company.id, id: { startsWith: PLAN_THREAD_PREFIX }, messages: { some: {} } },
+      where: { companyId: company.id, kind: "PLAN", messages: { some: {} } },
       orderBy: { updatedAt: "desc" },
       select: { id: true, title: true, updatedAt: true },
     }),
     prisma.conversationThread.findFirst({
-      where: { id: params.chat, companyId: company.id },
+      where: { id: params.chat, companyId: company.id, kind: "PLAN" },
       include: { messages: { orderBy: { createdAt: "desc" }, take: 100 } },
     }),
     prisma.actionPlan.findFirst({ where: { companyId: company.id, status: "ACTIVE" }, select: { id: true } }),
@@ -48,6 +48,7 @@ export default async function BuildActionPlanPage({ searchParams }: { searchPara
       threads={threads.map(item => ({ id: item.id, title: item.title, updatedAt: item.updatedAt.toISOString() }))}
       currentThreadId={thread.id}
       initialWorkshop={workshop}
+      initialMemory={readConversationMemory(thread.conversationMemory, "PLAN")}
       initialGenerationId={activeGeneration(thread.generationId, thread.generationStartedAt)}
       deleteAction={deleteConversation}
       renameAction={renameConversation}

@@ -34,9 +34,9 @@ async function main() {
   const auth = await db.authSession.create({ data: { userId: brayan.id, tokenHash: sessionTokenHash(token, config!), expiresAt: new Date(Date.now() + 3600_000) } });
   const cookie = `${AUTH_COOKIE_NAME}=${token}`;
   const diagnosis = await db.diagnosticSession.create({ data: { companyId, templateId: template.id, title: `QA plano separado ${runId}`, status: "COMPLETED", completedAt: new Date(), resultSummary: "Diagnóstico temporário para validar a área exclusiva de planos." } });
-  const planning = await db.conversationThread.create({ data: { id: planThreadId(diagnosis.id), companyId, title: `Plano de ação · QA ${runId}`, workflowState: newWorkshop(diagnosis.id, diagnosis.title!) as never, messages: { create: { role: "ASSISTANT", content: "Vamos montar somente o plano deste diagnóstico." } } } });
+  const planning = await db.conversationThread.create({ data: { id: planThreadId(diagnosis.id), companyId, kind: "PLAN", title: `Plano de ação · QA ${runId}`, workflowState: newWorkshop(diagnosis.id, diagnosis.title!) as never, messages: { create: { role: "ASSISTANT", content: "Vamos montar somente o plano deste diagnóstico." } } } });
   const operational = await db.conversationThread.create({ data: { companyId, title: `QA classificação ${runId}` } });
-  const activePlan = await db.actionPlan.create({ data: { companyId, title: `QA plano ativo ${runId}`, objective: "Validar classificação de tarefas", status: "ACTIVE", windowDays: 7, startsAt: new Date(), baseline: { source: "QA" }, targetOutcome: { source: "QA" }, tasks: { create: { companyId, title: "Tarefa base de QA", status: "TODO", priority: "LOW", sortOrder: 1 } } } });
+  const activePlan = await db.actionPlan.create({ data: { companyId, title: `QA plano ativo ${runId}`, objective: "Validar classificação de tarefas", status: "ACTIVE", windowDays: 7, startsAt: new Date(), baseline: { source: "QA" }, targetOutcome: { source: "QA" }, tasks: { create: { companyId, title: `Tarefa base de QA ${runId}`, status: "TODO", priority: "LOW", sortOrder: 1, executionGuide: { steps: [{ title: "Preparar", instruction: "Separar o pedido que será conferido.", doneWhen: "Pedido separado." }, { title: "Registrar", instruction: "Registrar o resultado observado na conferência.", doneWhen: "Registro salvo." }], recording: { kind: "FORM", title: "Registro de conferência", unit: "ocorrência", instructions: "Informe os dados observados na conferência.", fields: [{ key: "pedido", label: "Pedido", hint: "Identifique o pedido.", example: "QA001", type: "TEXT", required: true }, { key: "resultado", label: "Resultado", hint: "Descreva o resultado.", example: "Sem divergência", type: "TEXT", required: true }] }, completionCriteria: "Registrar a conferência do pedido selecionado.", improvementCriteria: "Comparar as divergências registradas no período.", reviewQuestion: "O registro foi concluído?" } } } } });
   const adHocBefore = await db.actionPlan.findUnique({ where: { id: `coo-adhoc-${companyId}` }, select: { id: true, status: true } });
   let createdTaskId: string | null = null;
   try {
@@ -49,6 +49,13 @@ async function main() {
     assert.doesNotMatch(workspace, /Ferramentas e arquivos|Nova conversa/);
     const coo = await fetch(`${base}/assistente`, { headers: { Cookie: cookie } }).then(response => response.text());
     assert.doesNotMatch(coo, new RegExp(`Plano de ação · QA ${runId}`));
+
+    const planTask = await db.task.findFirstOrThrow({ where: { actionPlanId: activePlan.id, companyId } });
+    const record = await send(operational.id, `Preencha para mim o formulário da tarefa "${planTask.title}" com Pedido: QA001; Resultado: sem divergência. Prepare a proposta, sem concluir a tarefa.`, cookie);
+    assert.ok(record.proposal?.id, record.text);
+    const recordProposal = await db.cooActionProposal.findUniqueOrThrow({ where: { id: record.proposal.id } });
+    assert.equal((recordProposal.action as Record<string, unknown>).type, "task.record");
+    await fetch(`${base}/api/assistant/proposals`, { method: "POST", headers: { "Content-Type": "application/json", Origin: base, Cookie: cookie }, body: JSON.stringify({ id: recordProposal.id, decision: "reject" }) });
 
     const ambiguous = await send(operational.id, `Adicione a tarefa Conferir pedido QA ${runId}. A descrição é conferir as medidas antes do corte.`, cookie);
     assert.equal(ambiguous.proposal, null);
@@ -83,7 +90,7 @@ async function main() {
     const rejectedBody = await rejected.text();
     assert.equal(rejected.status, 200, rejectedBody);
     assert.equal((await db.actionPlan.findUniqueOrThrow({ where: { id: activePlan.id } })).objective, "Validar classificação de tarefas");
-    console.log(JSON.stringify({ result: "PASS", diagnosticsHub: true, isolatedWorkspace: true, cooHistorySeparated: true, ambiguousTaskAsked: true, adHocTaskSeparated: true, planChangeRequiresApproval: true }));
+    console.log(JSON.stringify({ result: "PASS", diagnosticsHub: true, isolatedWorkspace: true, cooHistorySeparated: true, cooCanFillTaskRecord: true, ambiguousTaskAsked: true, adHocTaskSeparated: true, planChangeRequiresApproval: true }));
   } finally {
     if (createdTaskId) await db.task.deleteMany({ where: { id: createdTaskId, companyId } });
     if (!adHocBefore) await db.actionPlan.deleteMany({ where: { id: `coo-adhoc-${companyId}`, companyId } });

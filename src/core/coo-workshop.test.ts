@@ -57,3 +57,11 @@ test("permite propor revisão final diretamente quando já há 3 a 5 iniciativas
     assert.equal(state.stage,"REVIEW");assert.equal(state.plan?.initiatives.length,count);
   }
 });
+
+test("acordo curto exige confirmação vinculada à sugestão, nunca sim solto", () => {
+  const patch = proposal(3);
+  patch.planningAgreement!.capacity = { sourceMessageId: "yes", excerpt: "sim" };
+  const messages = [...managerMessages, { id: "yes", content: "sim" }];
+  assert.throws(() => applyWorkshopPatch(initial, patch, messages, [], []), /inequívoca/);
+  assert.equal(applyWorkshopPatch(initial, patch, messages, [], [], ["yes"]).stage, "REVIEW");
+});
