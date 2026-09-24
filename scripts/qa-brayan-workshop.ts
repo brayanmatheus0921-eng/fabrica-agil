@@ -9,6 +9,7 @@ import { newWorkshop, readWorkshop } from "../src/core/coo-workshop";
 import { readExecutionGuide } from "../src/core/task-execution";
 import { taskProgress } from "../src/core/task-progress";
 import { planThreadId } from "../src/core/plan-thread";
+import { conversationMemorySchema } from "../src/core/conversation-memory";
 
 loadEnvFile(".env.local");
 loadEnvFile(".env");
@@ -63,6 +64,10 @@ async function main(){
     const plan=await db.actionPlan.findFirstOrThrow({where:{companyId,baseline:{path:["threadId"],equals:thread.id}},include:{tasks:true,checkins:true}});
     const state=readWorkshop((await db.conversationThread.findUniqueOrThrow({where:{id:thread.id}})).workflowState);
     assert.equal(plan.status,"ACTIVE");assert.equal(state?.stage,"FOLLOW_UP");
+    const approvedThread=await db.conversationThread.findUniqueOrThrow({where:{id:thread.id}});
+    assert.equal(conversationMemorySchema.parse(approvedThread.conversationMemory).currentStage,state?.stage,"aprovação persiste Registro e workflow na mesma etapa");
+    const approvalView=await fetch(`${base}/api/assistant/proposals?threadId=${thread.id}`,{headers}).then(r=>r.json());
+    assert.equal(approvalView.memory.currentStage,approvalView.workshop.stage,"frontend recebe a mesma etapa do Registro e do workflow");
     assert.ok(state!.plan!.initiatives.length>=3&&state!.plan!.initiatives.length<=5);
     assert.ok(plan.tasks.length>=3&&plan.tasks.every(task=>Boolean(task.ownerName&&task.dueAt&&task.executionGuide)));
     assert.equal(plan.checkins.length,1);
@@ -76,6 +81,8 @@ async function main(){
     assert.equal(resume.status,200);
     const resumeEvents=(await resume.text()).trim().split("\n").filter(Boolean).map(line=>JSON.parse(line));
     assert.ok(resumeEvents.some(e=>e.type==="done")&&!resumeEvents.some(e=>["error","stopped"].includes(e.type)),"aprovação final retoma próximo passo");
+    assert.equal(resumeEvents.find(e=>e.type==="done").memory.currentStage,"FOLLOW_UP","retomada não regride a etapa do Registro");
+    assert.equal(conversationMemorySchema.parse((await db.conversationThread.findUniqueOrThrow({where:{id:thread.id}})).conversationMemory).currentStage,"FOLLOW_UP");
     assert.equal(await db.conversationMessage.count({where:{threadId:thread.id,role:"USER"}}),usersBefore,"retomada não inventa resposta do gestor");
     const repeatedResume=await fetch(`${base}/api/assistant/chat`,{method:"POST",headers,body:JSON.stringify({threadId:thread.id,requestId:randomUUID(),resumeProposalId:final.proposal.id})});
     assert.equal(repeatedResume.status,409);

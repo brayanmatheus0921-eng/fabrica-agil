@@ -12,6 +12,37 @@ test("sim confirma somente a sugestão inequívoca imediatamente anterior", () =
   assert.equal(resolveShortConfirmation(emptyConversationMemory("PLAN"), messages), null);
 });
 
+test("sim registra a decisão confirmada mesmo quando a resposta a parafraseia", () => {
+  const previous = { ...emptyConversationMemory("PLAN"), awaitingConfirmation: { text: "Retrabalho será a prioridade pelos próximos 30 dias", assistantMessageId: "a1" } };
+  const messages = [{ id: "a1", role: "ASSISTANT", content: "Retrabalho será a prioridade pelos próximos 30 dias. Concorda?" }, { id: "u1", role: "USER", content: "sim" }];
+  const draft = { ...emptyConversationMemory("PLAN"), currentStage: "PLAN", summary: "Prioridade combinada", decisions: [{ text: "Priorizaremos retrabalho neste ciclo", sourceMessageId: "u1", excerpt: "sim" }], hypotheses: ["A confirmar: Retrabalho será a prioridade pelos próximos 30 dias"] };
+  const result = consolidateMemory(previous, draft, messages, "PLAN", "a2", "Agora vamos definir o responsável.");
+  assert.deepEqual(result.decisions, [{ text: "Retrabalho será a prioridade pelos próximos 30 dias", sourceMessageId: "u1", excerpt: "sim" }]);
+  assert.deepEqual(result.hypotheses, []);
+});
+
+test("incerteza na mensagem original impede promover trecho isolado a fato", () => {
+  const previous = emptyConversationMemory("PLAN");
+  const draft = { ...previous, confirmedFacts: [{ text: "Vendas é o principal problema", sourceMessageId: "u1", excerpt: "nosso problema seja vendas" }] };
+  const result = consolidateMemory(previous, draft, [{ id: "u1", role: "USER", content: "Talvez nosso problema seja vendas; ainda não tenho certeza." }], "PLAN", "a1", "Vamos investigar?");
+  assert.deepEqual(result.confirmedFacts, []);
+  assert.ok(result.hypotheses.includes("A confirmar: Vendas é o principal problema"));
+});
+
+test("fato antigo incerto é rebaixado quando a fonte completa está disponível", () => {
+  const item = { text: "Vendas é o principal problema", sourceMessageId: "u1", excerpt: "nosso problema seja vendas" };
+  const previous = { ...emptyConversationMemory("PLAN"), confirmedFacts: [item] };
+  const result = consolidateMemory(previous, previous, [{ id: "u1", role: "USER", content: "Talvez nosso problema seja vendas." }], "PLAN", "a1", "Vamos confirmar?");
+  assert.deepEqual(result.confirmedFacts, []);
+});
+
+test("incerteza sobre um assunto não descarta fato declarado em outra frase", () => {
+  const previous = emptyConversationMemory("PLAN");
+  const fact = { text: "Brayan coordena o plano", sourceMessageId: "u1", excerpt: "Brayan coordena o plano" };
+  const result = consolidateMemory(previous, { ...previous, confirmedFacts: [fact] }, [{ id: "u1", role: "USER", content: "Talvez vendas seja o gargalo. Brayan coordena o plano." }], "PLAN", "a1", "Qual prazo?");
+  assert.deepEqual(result.confirmedFacts, [fact]);
+});
+
 test("registro preserva fatos antigos e rebaixa afirmações sem fonte literal para hipótese", () => {
   const previous = emptyConversationMemory("PLAN");
   const fact = { text: "Mateus é responsável", sourceMessageId: "old", excerpt: "Mateus é responsável" };
@@ -40,6 +71,6 @@ test("progresso da entrevista acompanha registro sem criar plano nem tarefas", (
 
 test("registro é limitado e não permite usar etapa operacional no Plano", () => {
   const memory = emptyConversationMemory("PLAN");
-  assert.throws(() => consolidateMemory(memory, { ...memory, hypotheses: Array(31).fill("Hipótese") }, [], "PLAN", "a1", "Pergunta?"));
-  assert.throws(() => consolidateMemory(memory, { ...memory, currentStage: "EXECUTION" }, [], "PLAN", "a1", "Pergunta?"));
+  assert.deepEqual(consolidateMemory(memory, { ...memory, hypotheses: Array(31).fill("Hipótese") }, [], "PLAN", "a1", "Pergunta?").hypotheses, ["Hipótese"]);
+  assert.deepEqual(consolidateMemory(memory, { ...memory, currentStage: "EXECUTION" }, [], "PLAN", "a1", "Pergunta?"), memory);
 });

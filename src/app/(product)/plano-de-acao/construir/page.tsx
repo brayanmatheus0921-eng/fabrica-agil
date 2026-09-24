@@ -48,7 +48,7 @@ export default async function BuildActionPlanPage({ searchParams }: { searchPara
       threads={threads.map(item => ({ id: item.id, title: item.title, updatedAt: item.updatedAt.toISOString() }))}
       currentThreadId={thread.id}
       initialWorkshop={workshop}
-      initialMemory={readConversationMemory(thread.conversationMemory, "PLAN")}
+      initialMemory={readConversationMemory(thread.conversationMemory, "PLAN", { workshop })}
       initialGenerationId={activeGeneration(thread.generationId, thread.generationStartedAt)}
       deleteAction={deleteConversation}
       renameAction={renameConversation}

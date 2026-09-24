@@ -14,7 +14,8 @@ export async function GET(request: Request) {
   if (!threadId) return Response.json({error:"Conversa inválida."},{status:400});
   const proposals = await prisma.cooActionProposal.findMany({where:{companyId:auth.companyId,threadId,proposedByUserId:auth.userId},orderBy:{createdAt:"desc"},take:100});
   const thread = await prisma.conversationThread.findFirst({where:{id:threadId,companyId:auth.companyId},select:{workflowState:true,conversationMemory:true,kind:true}});
-  return Response.json({proposals:proposals.reverse().map(proposalView),workshop:thread?.kind === "PLAN" ? readWorkshop(thread.workflowState) : null,memory:readConversationMemory(thread?.conversationMemory,thread?.kind ?? "COO")}, {headers:{"Cache-Control":"no-store"}});
+  const workshop = thread?.kind === "PLAN" ? readWorkshop(thread.workflowState) : null;
+  return Response.json({proposals:proposals.reverse().map(proposalView),workshop,memory:readConversationMemory(thread?.conversationMemory,thread?.kind ?? "COO", { workshop })}, {headers:{"Cache-Control":"no-store"}});
 }
 export async function POST(request: Request) {
   if (!request.headers.get("origin") || !sameOrigin(request)) return Response.json({error:"Origem inválida."},{status:403});

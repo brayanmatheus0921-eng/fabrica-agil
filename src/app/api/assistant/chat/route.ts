@@ -86,7 +86,7 @@ export async function POST(request: Request) {
         emit({ type: "ack", userId, assistantId, threadId });
         emit({ type: "activity", text: "Consultando o diagnóstico e o contexto salvo…" });
         const thread = await prisma.conversationThread.findFirstOrThrow({ where: { id: threadId, companyId: auth.companyId } });
-        const previousMemory = readConversationMemory(thread.conversationMemory, thread.kind);
+        const previousMemory = readConversationMemory(thread.conversationMemory, thread.kind, { workshop: thread.kind === "PLAN" ? readWorkshop(thread.workflowState) : null });
         const recent = await prisma.conversationMessage.findMany({ where: { threadId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], ...(thread.conversationMemory ? { take: 40 } : {}) });
         const olderSources = await prisma.conversationMessage.findMany({ where: { threadId, id: { in: memorySourceIds(previousMemory), notIn: recent.map(row => row.id) } }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
         const history = [...olderSources, ...recent.reverse()];
@@ -147,7 +147,7 @@ export async function POST(request: Request) {
         emit({ type: "activity", text: "Preparando uma resposta e o próximo passo…" });
         if(resumeExecution){
           text="Plano aprovado e tarefas liberadas. Você pode [acompanhar o plano](/plano-de-acao) ou seguir para [o chat geral do COO](/assistente) para executar, registrar resultados e ajustar o trabalho com sua aprovação.";
-          nextMemory={...previousMemory,currentStage:"REVIEW",nextStep:"Acompanhar a execução no plano ou continuar no chat geral do COO.",pendingQuestions:[],awaitingConfirmation:null};
+          nextMemory=readConversationMemory(previousMemory, thread.kind, { workshop: current });
           emit({type:"delta",text});
         }else if(interviewing){
           const responseSchema=groundedInterviewSchema(history.filter(m=>m.role==="USER").map(m=>m.id),diagnosis?.answers.map(a=>a.question.code)??[],catalog.map(m=>m.code));
@@ -203,7 +203,9 @@ export async function POST(request: Request) {
           await tx.$queryRaw`SELECT id FROM "ConversationThread" WHERE id = ${threadId} FOR UPDATE`;
           const fresh = await tx.conversationThread.findFirst({ where: { id: threadId, companyId: auth.companyId, generationId: requestId } });
           if (!fresh || controller.signal.aborted) throw new Error("Resposta interrompida");
+          nextMemory = readConversationMemory(nextMemory, thread.kind, { fallback: previousMemory });
           const nextWorkshop = current ? workshopFromMemory(current, nextMemory) : null;
+          nextMemory = readConversationMemory(nextMemory, thread.kind, { fallback: previousMemory, workshop: nextWorkshop });
           await tx.conversationThread.update({ where: { id: threadId }, data: { conversationMemory: nextMemory as never, ...(nextWorkshop ? { workflowState: nextWorkshop as never } : {}) } });
           const proposal = actionDraft && proposalSourceId ? await proposeAction(tx, auth, threadId, proposalSourceId, actionDraft) : null;
           await tx.conversationMessage.create({ data: { id: assistantId, threadId, role: "ASSISTANT", content: text, metadata: { requestId, ...(resumeProposalId ? { continuationForProposalId: resumeProposalId } : {}) } } });

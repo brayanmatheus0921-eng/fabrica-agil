@@ -6,6 +6,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { conversationPath } from "@/core/plan-thread";
 import { readWorkshop } from "@/core/coo-workshop";
+import { confirmedConversationDeletion } from "@/core/conversation-deletion";
 export async function startNewConversation() {
   redirect("/assistente");
 }
@@ -32,6 +33,7 @@ export async function deleteConversation(formData: FormData) {
   const threadId = z.string().min(1).safeParse(formData.get("threadId"));
   if (!threadId.success) redirect("/assistente?error=Conversa+inválida");
   const thread = await prisma.conversationThread.findFirst({ where: { id: threadId.data, companyId: (await requireAuth()).companyId } });
+  if (!thread || !confirmedConversationDeletion(thread.title, formData.get("confirmation"))) redirect(`${conversationPath(thread?.kind ?? "COO", threadId.data)}&error=Confirme+a+exclusão+da+conversa`);
   if (readWorkshop(thread?.workflowState)?.planId) redirect(`${conversationPath(thread?.kind ?? "COO", threadId.data)}&error=Esta+conversa+guarda+as+decisões+do+plano.+Para+limpar+o+ciclo,+exclua+o+diagnóstico+correspondente.`);
   await prisma.conversationThread.deleteMany({ where: { id: threadId.data, companyId: (await requireAuth()).companyId, generationId: null } });
   revalidatePath("/assistente"); revalidatePath("/plano-de-acao"); revalidatePath("/plano-de-acao/construir"); redirect(conversationPath(thread?.kind ?? "COO"));

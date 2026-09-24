@@ -1,6 +1,7 @@
 import type { Prisma } from "../../generated/prisma/client";
 import { asDiagnosticRecord } from "../../core/diagnostic-history";
 import { readWorkshop } from "../../core/coo-workshop";
+import { readConversationMemory } from "../../core/conversation-memory";
 
 function addDays(date: Date, days: number) {
   const result = new Date(date);
@@ -22,8 +23,9 @@ export async function activateDraftPlan(tx: Prisma.TransactionClient, companyId:
     await tx.$queryRaw`SELECT id FROM "ConversationThread" WHERE id = ${threadId} FOR UPDATE`;
     const thread = await tx.conversationThread.findFirst({ where: { id: threadId, companyId } });
     const state = readWorkshop(thread?.workflowState);
-    if (!state || thread?.generationId || state.stage !== "REVIEW" || !state.plan || state.plan.initiatives.length < 3 || state.plan.initiatives.length > 5 || state.revision !== baseline.workshopRevision || state.planId !== draft.id) return false;
-    await tx.conversationThread.update({ where: { id: threadId }, data: { workflowState: { ...state, stage: "FOLLOW_UP", furthestStage: 6, revision: state.revision + 1, history: [...state.history, { revision: state.revision, stage: state.stage, summary: "Plano aprovado pelo gestor na plataforma.", at: now.toISOString() }] } as never } });
+    if (!thread || !state || thread.generationId || state.stage !== "REVIEW" || !state.plan || state.plan.initiatives.length < 3 || state.plan.initiatives.length > 5 || state.revision !== baseline.workshopRevision || state.planId !== draft.id) return false;
+    const approved = { ...state, stage: "FOLLOW_UP" as const, furthestStage: 6, revision: state.revision + 1, history: [...state.history, { revision: state.revision, stage: state.stage, summary: "Plano aprovado pelo gestor na plataforma.", at: now.toISOString() }] };
+    await tx.conversationThread.update({ where: { id: threadId }, data: { workflowState: approved as never, conversationMemory: readConversationMemory(thread.conversationMemory, "PLAN", { workshop: approved }) as never } });
   }
   const deadlines = asDiagnosticRecord(draft.targetOutcome).taskDeadlines;
   // Multiple projects may run at the same time. Approving a new plan no longer pauses the others.
