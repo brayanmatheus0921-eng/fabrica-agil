@@ -124,7 +124,7 @@ export default async function AssistantPage({
     <div className="flex h-full min-h-0 overflow-hidden bg-white">
         <AssistantChat
           key={thread?.id ?? "new-conversation"}
-          messages={messages.map((message) => ({ id: message.id, role: message.role, content: message.content + (asDiagnosticRecord(message.metadata).interrupted ? "\n\n[Resposta interrompida]" : asDiagnosticRecord(message.metadata).failed ? "\n\n[Resposta não concluída]" : "") }))}
+          messages={messages.map((message) => ({ id: message.id, role: message.role, content: message.content + (asDiagnosticRecord(message.metadata).interrupted ? "\n\n[Resposta interrompida]" : asDiagnosticRecord(message.metadata).failed ? "\n\n[Resposta não concluída]" : ""), proposalId: typeof asDiagnosticRecord(message.metadata).proposalId === "string" ? String(asDiagnosticRecord(message.metadata).proposalId) : undefined }))}
           threads={threads.map((item) => ({ id: item.id, title: item.title, updatedAt: item.updatedAt.toISOString() }))}
           currentThreadId={thread?.id ?? "new"}
           initialWorkshop={null}
