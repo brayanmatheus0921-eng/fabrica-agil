@@ -12,8 +12,8 @@
 .watermark {
   display: none;
   position: absolute;
-  right: -200px;
-  bottom: -370px;
+  right: -260px;
+  top: 90px;
   width: 900px;
   height: 900px;
   color: var(--foreground);
