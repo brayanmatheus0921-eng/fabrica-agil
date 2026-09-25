@@ -56,7 +56,7 @@ export function DesktopNavigation() {
   const pathname = usePathname();
 
   return (
-    <nav aria-label="Navegação principal" className="app-navigation flex flex-col gap-5">
+    <nav aria-label="Navegação principal" className="app-navigation flex flex-col gap-4">
       {navigation.map((section) => (
         <div key={section.label}>
           <p className="navigation-section-label px-3 text-[9px] font-black uppercase tracking-[0.19em] text-muted">
@@ -74,14 +74,14 @@ export function DesktopNavigation() {
                   title={item.label}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "navigation-link group relative flex min-h-11 items-center rounded-xl text-sm font-semibold transition",
+                    "navigation-link group relative flex min-h-11 items-center rounded-xl text-[13px] font-semibold transition lg:min-h-10",
                     "gap-3 px-3",
                     active
                       ? "bg-accent-warm text-primary"
                       : "text-muted hover:bg-surface-muted hover:text-foreground",
                   )}
                 >
-                  <Icon aria-hidden="true" className="size-[18px] shrink-0" strokeWidth={1.9} />
+                  <Icon aria-hidden="true" className="size-[17px] shrink-0" strokeWidth={1.9} />
                   <span className="navigation-label truncate">{item.label}</span>
                 </Link>
               );

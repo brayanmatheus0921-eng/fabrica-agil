@@ -7,7 +7,7 @@
 .coo-chat .coo-conversation { background-color: var(--surface); }
 .coo-chat .coo-conversation[data-empty="true"] { background-image: radial-gradient(var(--border) 0.65px, transparent 0.65px); background-size: 18px 18px; }
 .coo-chat .coo-conversation[data-empty="true"] > div { min-height: 100%; justify-content: center; }
-.coo-welcome-title { font-family: "Instrument Serif", Georgia, serif; font-size: clamp(30px, 3vw, 40px); font-weight: 400; letter-spacing: -0.02em; line-height: 1.15; }
+.coo-welcome-title { font-family: "Instrument Serif", Georgia, serif; font-size: clamp(28px, 2.7vw, 35px); font-weight: 400; letter-spacing: -0.02em; line-height: 1.15; }
 .coo-chat #assistant-details { background: var(--background); }
 .coo-chat #assistant-details .group.relative { border-color: transparent; border-radius: 8px; box-shadow: none; }
 .coo-chat #assistant-details .group.relative:has([aria-current="page"]) { background: var(--surface-muted); border-left: 2px solid var(--primary); }
@@ -269,7 +269,7 @@ html[data-theme="dark"] [class~="hover:bg-[#102b48]"]:hover {
 @media (min-width: 64rem) {
   .desktop-sidebar:hover,
   .desktop-sidebar:focus-within {
-    width: 280px;
+    width: 256px;
     box-shadow: 18px 0 35px -28px color-mix(in srgb, var(--foreground) 38%, transparent);
   }
 
