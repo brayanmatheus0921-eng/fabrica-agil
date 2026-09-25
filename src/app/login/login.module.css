@@ -1,11 +1,24 @@
 .page {
   position: relative;
   display: flex;
+  justify-content: center;
   min-height: 100dvh;
   overflow: clip;
   padding: clamp(36px, 10vh, 76px) 24px 40px;
-  background: radial-gradient(ellipse at 85% 110%, color-mix(in srgb, var(--primary) 18%, transparent), transparent 46%), var(--background);
+  background: var(--background);
   color: var(--foreground);
+}
+
+.watermark {
+  display: none;
+  position: absolute;
+  right: -200px;
+  bottom: -370px;
+  width: 900px;
+  height: 900px;
+  color: var(--foreground);
+  opacity: 0.045;
+  pointer-events: none;
 }
 
 .content {
@@ -164,7 +177,7 @@
 }
 
 @media (min-width: 900px) {
-  .content { margin-left: calc(50% - 305px); margin-right: 0; }
+  .watermark { display: block; }
 }
 
 @media (max-width: 479px) {
