@@ -4,10 +4,8 @@
   min-height: 100dvh;
   overflow: clip;
   padding: clamp(36px, 10vh, 76px) 24px 40px;
-  background: var(--background);
+  background: radial-gradient(ellipse at 85% 110%, color-mix(in srgb, var(--primary) 18%, transparent), transparent 46%), var(--background);
   color: var(--foreground);
-  background-image: linear-gradient(color-mix(in srgb, var(--border) 24%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--border) 24%, transparent) 1px, transparent 1px);
-  background-size: 40px 40px;
 }
 
 .content {
@@ -20,19 +18,28 @@
 
 .brand {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 12px;
-  margin-bottom: 36px;
+  gap: 18px;
+  margin-bottom: 38px;
 }
+
+.brandTagline {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.25em;
+  text-align: center;
+}
+
+.brandTagline span { margin-inline: 0.65em; color: var(--primary); }
 
 .card {
   width: 100%;
   padding: 32px;
   border-radius: 16px;
-  border: 1px solid var(--border);
   background: var(--surface);
-  box-shadow: 0 20px 60px rgb(0 0 0 / 14%);
+  box-shadow: 0 18px 56px rgb(0 0 0 / 16%);
 }
 
 .title {
@@ -163,6 +170,7 @@
 @media (max-width: 479px) {
   .page { padding: 36px 16px 24px; }
   .brand { margin-bottom: 28px; }
+  .brandTagline { font-size: 8px; letter-spacing: 0.16em; }
   .card { padding: 28px 24px; }
   .digits { gap: 8px; }
   .digit { width: 42px; height: 52px; }

@@ -10,7 +10,6 @@ import { asDiagnosticRecord } from "@/core/diagnostic-history";
 import {
   ArrowRight,
   Activity,
-  Brain,
   CalendarClock,
   Check,
   ClipboardCheck,
@@ -44,7 +43,7 @@ export default async function DashboardPage() {
     "reworkRange",
     "ownerDependency",
   ].every((key) => typeof profile[key] === "string" && String(profile[key]));
-  const [diagnostic, assessment, activePlans, memoryCount, workflowThreads] = await Promise.all([
+  const [diagnostic, assessment, activePlans, workflowThreads] = await Promise.all([
     prisma.diagnosticSession.findFirst({
       where: {
         companyId: company.id,
@@ -88,9 +87,6 @@ export default async function DashboardPage() {
         tasks: { where: { status: { not: "CANCELLED" } }, orderBy: { sortOrder: "asc" } },
         checkins: { where: { status: { in: ["SUBMITTED", "REVIEWED"] } } },
       },
-    }),
-    prisma.companyMemory.count({
-      where: { companyId: company.id, invalidatedAt: null },
     }),
     prisma.conversationThread.findMany({ where: { companyId: company.id }, orderBy: { updatedAt: "desc" }, take: 20, select: { id: true, workflowState: true } }),
   ]);
@@ -284,23 +280,6 @@ export default async function DashboardPage() {
             ) : null}
           </SectionCard>
 
-          <SectionCard className="p-5 sm:p-6">
-            <div className="flex items-center gap-3">
-              <span className="grid size-10 place-items-center rounded-xl bg-surface-muted text-primary">
-                <Brain aria-hidden="true" className="size-5" />
-              </span>
-              <div>
-                <p className="text-sm font-semibold">Memória da empresa</p>
-                <p className="text-xs text-muted">
-                  {memoryCount} {memoryCount === 1 ? "registro salvo" : "registros salvos"}
-                </p>
-              </div>
-            </div>
-            <p className="mt-4 text-xs leading-5 text-muted">
-              O COO usa os dados da empresa, o diagnóstico e a execução para
-              continuar a conversa sem perder o contexto.
-            </p>
-          </SectionCard>
         </div>
       </div>
 
@@ -318,7 +297,7 @@ export default async function DashboardPage() {
           },
           {
             icon: MessageSquareText,
-            title: "Consultor com contexto",
+            title: "COO para acompanhar",
             text: "O COO tira dúvidas e acompanha a aplicação e os resultados.",
           },
         ].map((item) => {

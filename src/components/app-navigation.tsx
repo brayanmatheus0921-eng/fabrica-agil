@@ -3,7 +3,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Activity,
-  Brain,
   Building2,
   ClipboardCheck,
   GraduationCap,
@@ -42,13 +41,9 @@ export const navigation: Array<{ label: string; items: NavigationItem[] }> = [
   },
   {
     label: "3 · Evoluir",
-    items: [{ href: "/acompanhamento", label: "Acompanhamento", icon: Activity }],
-  },
-  {
-    label: "Apoio",
     items: [
+      { href: "/acompanhamento", label: "Acompanhamento", icon: Activity },
       { href: "/aulas", label: "Aulas", icon: GraduationCap },
-      { href: "/memoria", label: "Histórico", icon: Brain },
     ],
   },
 ];

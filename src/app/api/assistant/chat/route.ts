@@ -84,7 +84,7 @@ export async function POST(request: Request) {
       const heartbeat=setInterval(()=>emit({type:"ping"}),10000);
       try {
         emit({ type: "ack", userId, assistantId, threadId });
-        emit({ type: "activity", text: "Consultando o diagnóstico e o contexto salvo…" });
+        emit({ type: "activity", text: "Analisando o diagnóstico e os dados da empresa…" });
         const thread = await prisma.conversationThread.findFirstOrThrow({ where: { id: threadId, companyId: auth.companyId } });
         const previousMemory = readConversationMemory(thread.conversationMemory, thread.kind, { workshop: thread.kind === "PLAN" ? readWorkshop(thread.workflowState) : null });
         const recent = await prisma.conversationMessage.findMany({ where: { threadId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], ...(thread.conversationMemory ? { take: 40 } : {}) });

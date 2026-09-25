@@ -91,13 +91,13 @@ export default async function CompanyPage({
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 sm:space-y-8">
       <PageHeader
-        eyebrow="Contexto permanente"
+        eyebrow="Perfil da empresa"
         title="Perfil da empresa"
         description="Dados estáveis para o diagnóstico e para a consultora entender o tamanho, o ritmo e o objetivo da fábrica."
         actions={
           <StatusPill tone={missingProfileFields === 0 ? "success" : "warning"}>
             {missingProfileFields === 0
-              ? "Contexto completo"
+              ? "Cadastro completo"
               : `${missingProfileFields} dados para completar`}
           </StatusPill>
         }
@@ -106,7 +106,7 @@ export default async function CompanyPage({
       {params.saved ? (
         <div className="flex items-center gap-2 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-primary">
           <CheckCircle2 aria-hidden="true" className="size-4 shrink-0" />
-          Alterações salvas. A consultora já recebeu o novo contexto.
+          Cadastro atualizado.
         </div>
       ) : null}
       {params.error ? (

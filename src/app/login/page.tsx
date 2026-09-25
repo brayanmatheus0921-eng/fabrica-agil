@@ -14,7 +14,10 @@ export default async function LoginPage() {
   return (
     <main className={styles.page}>
       <div className={styles.content}>
-        <div className={styles.brand}><BrandMark /></div>
+        <div className={styles.brand}>
+          <BrandMark large />
+          <p className={styles.brandTagline}>DIAGNÓSTICO <span aria-hidden="true">|</span> PRIORIDADE <span aria-hidden="true">|</span> EXECUÇÃO</p>
+        </div>
         <LoginForm />
       </div>
     </main>

@@ -201,7 +201,7 @@ export default async function DiagnosticsPage({
   }
 
   if (selected.template.code === STRATEGIC_OPERATIONAL_METHOD_CODE && selected.status === "COMPLETED") {
-    return <div className="space-y-6 sm:space-y-8"><Link href="/diagnostico" className="inline-flex text-sm font-bold text-primary">← Todos os diagnósticos</Link><PageHeader eyebrow="Produtividade da fábrica" title={selectedTitle ?? "Identificação Estratégica Operacional"} description={`Resultado operacional da ${company.name}, calculado pela Matriz de Identificação Estratégica.`}/><DiagnosticPlanNextStep sessionId={selected.id}/>{params.completed ? <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">Diagnóstico concluído e salvo no histórico da empresa.</div> : null}<StrategicResult snapshot={selected.resultSnapshot}/><div className="flex flex-wrap gap-3"><Link href="/diagnostico" className="inline-flex items-center gap-2 rounded-xl border px-5 py-3 text-sm font-semibold">Todos os diagnósticos</Link><DeleteDiagnosticButton sessionId={selected.id}/></div></div>;
+    return <div className="space-y-6 sm:space-y-8"><Link href="/diagnostico" className="inline-flex text-sm font-bold text-primary">← Todos os diagnósticos</Link><PageHeader eyebrow="Produtividade da fábrica" title={selectedTitle ?? "Identificação Estratégica Operacional"} description={`Resultado operacional da ${company.name}, calculado pela Matriz de Identificação Estratégica.`}/><DiagnosticPlanNextStep sessionId={selected.id}/>{params.completed ? <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">Diagnóstico concluído. Veja o resultado e monte seu plano de ação.</div> : null}<StrategicResult snapshot={selected.resultSnapshot}/><div className="flex flex-wrap gap-3"><Link href="/diagnostico" className="inline-flex items-center gap-2 rounded-xl border px-5 py-3 text-sm font-semibold">Todos os diagnósticos</Link><DeleteDiagnosticButton sessionId={selected.id}/></div></div>;
   }
 
   const assessment = selected?.bottlenecks[0] ?? null;
@@ -290,10 +290,9 @@ export default async function DiagnosticsPage({
         <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
           <CheckCircle2 aria-hidden="true" className="mt-0.5 size-5 shrink-0" />
           <div>
-            <p className="font-bold">Diagnóstico concluído e salvo.</p>
+            <p className="font-bold">Diagnóstico concluído.</p>
             <p className="mt-0.5 text-xs text-emerald-800">
-              O resultado, as respostas e o método indicado já fazem parte do
-              histórico da empresa e do contexto do COO.
+              Revise o resultado e escolha o próximo passo para montar o plano de ação.
             </p>
           </div>
         </div>

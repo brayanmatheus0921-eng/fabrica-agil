@@ -5,11 +5,10 @@ import { CompanyDataSync } from "@/components/company-data-sync";
 export const dynamic = "force-dynamic";
 
 export default async function ProductLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const auth = await requireAuth();
-  const company = auth.company;
+  await requireAuth();
 
   return (
-    <AppShell companyName={company.name} userName={auth.userName} onboardingComplete={company.onboardingStatus === "COMPLETED"}>
+    <AppShell>
       <CompanyDataSync />
       {children}
     </AppShell>

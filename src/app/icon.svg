@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Fábrica Ágil">
   <rect width="64" height="64" rx="15" fill="#1E1E1E"/>
-  <path d="M16 15h26v8H25v8h15v8H25v10h-9V15Z" fill="#F8FAFC"/>
-  <path d="M45 15h7v34h-7z" fill="#F97316"/>
+  <path d="M8 45V31l13-7v21H8Z" fill="#66666A"/>
+  <path d="M25 45V22l13-7v24l-6 6h-7Z" fill="#96969A"/>
+  <path d="M40 16 56 7v38H35l5-6V16Z" fill="#F97316"/>
 </svg>

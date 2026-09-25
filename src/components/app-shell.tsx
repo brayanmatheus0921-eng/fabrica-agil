@@ -1,14 +1,12 @@
 "use client";
 
-import { LogOut, Menu, MessageSquareText, X } from "lucide-react";
+import { Menu, MessageSquareText, Settings2, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { DesktopNavigation } from "@/components/app-navigation";
 import { BrandMark } from "@/components/brand-mark";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { cn } from "@/lib/cn";
-import { logout } from "@/app/auth-actions";
 
 const pageNames: Record<string, string> = {
   dashboard: "Visão geral",
@@ -20,10 +18,10 @@ const pageNames: Record<string, string> = {
   acompanhamento: "Acompanhamento",
   assistente: "COO",
   aulas: "Aulas",
-  memoria: "Histórico",
+  configuracoes: "Configurações",
 };
 
-export function AppShell({ children, companyName, userName, onboardingComplete }: { children: ReactNode; companyName: string; userName: string; onboardingComplete: boolean }) {
+export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const segment = pathname.split("/").filter(Boolean)[0] ?? "dashboard";
   const pageName = pageNames[segment] ?? "Fábrica Ágil";
@@ -39,26 +37,14 @@ export function AppShell({ children, companyName, userName, onboardingComplete }
         </div>
 
         <div className="sidebar-scroll min-h-0 flex-1 overflow-y-auto px-3 py-5">
-          <div className="sidebar-expanded-only mb-5 rounded-xl border bg-surface-muted p-3.5">
-            <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-primary">Empresa ativa</p>
-            <p className="mt-2 truncate text-sm font-semibold">{companyName}</p>
-            <p className="mt-1 text-xs text-muted">{onboardingComplete ? "Contexto salvo" : "Cadastro pendente"}</p>
-          </div>
           <DesktopNavigation />
         </div>
 
         <div className="sidebar-footer shrink-0 border-t p-3">
-          <div className="sidebar-theme flex items-center gap-2">
-            <ThemeToggle />
-            <span className="sidebar-expanded-only text-xs text-muted">Aparência</span>
-          </div>
-          <div className="sidebar-expanded-only mt-3 rounded-xl bg-surface-muted p-3">
-            <p className="text-xs font-semibold">Tudo conectado</p>
-            <p className="mt-1 text-[10px] leading-4 text-muted">Diagnóstico, projetos, arquivos e conversas no mesmo contexto.</p>
-          </div>
-          <form action={logout} className="sidebar-expanded-only mt-2">
-            <button className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs text-muted transition hover:bg-surface-muted hover:text-foreground"><LogOut className="size-4" />Sair de {userName}</button>
-          </form>
+          <Link href="/configuracoes" title="Configurações" aria-current={segment === "configuracoes" ? "page" : undefined} className={cn("navigation-link flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-semibold transition", segment === "configuracoes" ? "bg-accent-warm text-primary" : "text-muted hover:bg-surface-muted hover:text-foreground")}>
+            <Settings2 aria-hidden="true" className="size-[18px] shrink-0" />
+            <span className="navigation-label truncate">Configurações</span>
+          </Link>
         </div>
       </aside>
 
@@ -70,15 +56,9 @@ export function AppShell({ children, companyName, userName, onboardingComplete }
             <label htmlFor="mobile-sidebar-toggle" aria-label="Fechar menu lateral" className="grid size-9 cursor-pointer place-items-center rounded-xl bg-surface-muted text-muted"><X className="size-5" /></label>
           </div>
           <div className="sidebar-scroll min-h-0 flex-1 overflow-y-auto px-3 py-5">
-            <div className="mb-5 rounded-xl border bg-surface-muted p-3.5">
-              <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-primary">Empresa ativa</p>
-              <p className="mt-2 truncate text-sm font-semibold">{companyName}</p>
-            </div>
             <DesktopNavigation />
-            <form action={logout} className="mt-5 border-t pt-4">
-              <button className="flex w-full items-center gap-2 rounded-xl px-3 py-3 text-sm text-muted"><LogOut className="size-4" />Sair de {userName}</button>
-            </form>
           </div>
+          <Link href="/configuracoes" className="flex min-h-14 items-center gap-3 border-t px-6 text-sm font-semibold text-muted"><Settings2 aria-hidden="true" className="size-4" />Configurações</Link>
         </aside>
       </div>
 
@@ -89,7 +69,6 @@ export function AppShell({ children, companyName, userName, onboardingComplete }
             <p className="truncate text-sm font-semibold">{pageName}</p>
           </div>
           <div className="flex items-center gap-2">
-            <span className="lg:hidden"><ThemeToggle compact /></span>
             {segment !== "assistente" ? <Link href="/assistente" className="hidden min-h-10 items-center gap-2 rounded-xl border bg-white px-3.5 text-xs font-semibold sm:inline-flex"><MessageSquareText className="size-4" />Falar com o COO</Link> : null}
             <span className="grid size-9 place-items-center rounded-full bg-primary text-[10px] font-bold text-[var(--primary-contrast)]">FA</span>
           </div>

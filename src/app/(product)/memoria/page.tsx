@@ -131,7 +131,7 @@ export default async function MemoryPage() {
                 <div>
                   <p className="text-lg font-semibold">Registros válidos</p>
                   <p className="text-xs text-muted">
-                    Contexto disponível para uso futuro pelo COO
+                    Informações disponíveis para o COO
                   </p>
                 </div>
               </div>

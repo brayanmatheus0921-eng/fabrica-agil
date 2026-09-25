@@ -196,9 +196,6 @@ export default async function DiagnosticGuidancePage({
           </div>
         </section>
 
-        <p className="text-center text-[11px] leading-[18px] text-[#7b897f]">
-          Cadastro salvo · diagnóstico salvo · contexto disponível para o COO
-        </p>
       </div>
     </main>
   );
