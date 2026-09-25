@@ -1,4 +1,5 @@
 import { requireAuth } from "@/server/auth";
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { sameOrigin } from "@/server/ai/chat-generation";
@@ -33,6 +34,7 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
    }
    return readRecords(await tx.evidenceOutput.findMany({where:{taskId:id,companyId:(await requireAuth()).companyId},orderBy:{createdAt:"asc"}}));
   });
+  revalidatePath("/acompanhamento");
   return Response.json({records});
  }catch(e){return Response.json({error:e instanceof Error&&!("code" in e)?e.message:"Não foi possível salvar. Tente novamente."},{status:400});}
 }

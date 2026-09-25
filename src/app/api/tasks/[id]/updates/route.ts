@@ -1,4 +1,5 @@
 import { requireAuth } from "@/server/auth";
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { sameOrigin } from "@/server/ai/chat-generation";
@@ -14,5 +15,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { requestId, ...metadata } = body.data;
   const key = `task-update-${id}-${requestId}`;
   const note = await prisma.evidenceOutput.upsert({ where: { id: key }, update: {}, create: { id: key, companyId: (await requireAuth()).companyId, taskId: id, type: "NOTE", label: metadata.category, textValue: metadata.text, metadata } });
+  revalidatePath("/acompanhamento");
   return Response.json({ note: { id: note.id, text: note.textValue, category: metadata.category, at: note.createdAt.toISOString() } });
 }

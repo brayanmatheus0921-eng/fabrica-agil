@@ -16,7 +16,7 @@ import { COO_ACTION_INSTRUCTIONS } from "@/server/coo/instructions";
 import { WORKSHOP_AGENT_INSTRUCTIONS, completePlanExecution, groundedInterviewSchema, renderInterviewQuestion } from "@/server/ai/workshop-agent";
 import { canvasSchema, validateCanvas } from "@/core/workspace-artifacts";
 import { CANVAS_INSTRUCTIONS } from "@/server/ai/artifact-agent";
-import { taskProgress } from "@/core/task-progress";
+import { executionContext, taskProgress } from "@/core/task-progress";
 import { findReusableCanvas } from "@/server/artifact-deduplication";
 import { cooModeAllowsOperationalTools, resolveCooMode } from "@/core/coo-mode";
 import { CONVERSATION_MEMORY_INSTRUCTIONS, consolidateMemory, memoryDraftSchema, memorySourceIds, readConversationMemory, resolveShortConfirmation, workshopFromMemory, type ConversationMemory } from "@/core/conversation-memory";
@@ -139,7 +139,7 @@ export async function POST(request: Request) {
         const snapshot = diagnosis?.resultSnapshot && typeof diagnosis.resultSnapshot === "object" ? { ...diagnosis.resultSnapshot as object } as Record<string, unknown> : null;
         if (snapshot) { delete snapshot.analysis; delete snapshot.analysisError; }
         const artifacts = await prisma.workspaceArtifact.findMany({ where: { companyId: auth.companyId, OR: [{threadId}, ...(progressPlan ? [{taskId: {in: progressPlan.tasks.map(t=>t.id)}}] : [])] }, select: {id:true,title:true,taskId:true,kind:true,confirmedAt:true,interpretation:true}, orderBy:{updatedAt:"desc"},take:30 });
-        const automaticProgress = progressPlan ? taskProgress(progressPlan.tasks, artifacts) : null;
+        const automaticProgress = progressPlan ? executionContext(progressPlan.id, taskProgress(progressPlan.tasks, artifacts)) : null;
         agent.instructions = `${agent.instructions}\n${CONVERSATION_MEMORY_INSTRUCTIONS}`;
         const scopedContext = current ? { company: context.company, selectedPlan, note: "Use exclusivamente o diagnóstico e a memória desta conversa de Plano. Não acesse conversas ou ferramentas do COO." } : context;
         const projects = current ? [] : await readSystem(prisma, auth.companyId, {area:"projects",query:"",projectId:null,recordId:null,offset:0});
