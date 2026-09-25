@@ -5,6 +5,7 @@ import {
   type CompanyProfileValues,
 } from "@/core/company-profile";
 import { OnboardingProgress } from "@/components/onboarding-progress";
+import { BrandMark } from "@/components/brand-mark";
 import { saveOnboardingStep } from "./actions";
 import styles from "./first-access.module.css";
 
@@ -24,9 +25,7 @@ export function FirstAccessFlow({
       <main className="first-access min-h-dvh bg-background px-4 py-5 sm:px-8 sm:py-8">
         <div className="mx-auto flex min-h-[calc(100dvh-4rem)] max-w-3xl flex-col">
           <header className="flex items-center justify-between">
-            <Link href="/" className="text-lg font-black tracking-[-0.04em] text-[#0b1320]">
-              Fábrica Ágil
-            </Link>
+            <Link href="/" aria-label="Fábrica Ágil"><BrandMark compact /></Link>
             <Link href="/dashboard" className="rounded-xl border bg-white px-4 py-2.5 text-sm font-bold text-[#59616d] hover:text-[#0b1320]">
               Pular por agora
             </Link>
@@ -70,9 +69,7 @@ export function FirstAccessFlow({
     <main className={`first-access ${styles.screen} bg-background`}>
       <div className={styles.shell}>
         <header className="relative z-10 flex items-center justify-between">
-          <Link href="/onboarding" className="text-base font-bold tracking-[-0.03em] text-foreground">
-            Fábrica Ágil
-          </Link>
+          <Link href="/onboarding" aria-label="Fábrica Ágil"><BrandMark compact /></Link>
           <Link href="/dashboard" className="rounded-xl border bg-white px-3.5 py-2 text-sm font-bold text-[#59616d] transition hover:border-[#c9c4bc] hover:text-[#0b1320] sm:px-4">
             Pular por agora
           </Link>

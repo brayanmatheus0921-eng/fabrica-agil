@@ -1,35 +1,33 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter/index.css";
+@import "@fontsource/instrument-serif/400.css";
+@import "@fontsource/instrument-serif/400-italic.css";
 
-/* COO: quiet session sidebar, dotted workspace and centered composer. */
-.coo-chat { --border: #e5e3df; --surface: #faf9f7; --surface-muted: #f0eeea; }
+/* The brand palette is shared by every product surface. */
 .coo-chat .coo-conversation { background-color: var(--surface); }
-.coo-chat .coo-conversation[data-empty="true"] { background-image: radial-gradient(#d9d7d2 0.65px, transparent 0.65px); background-size: 18px 18px; }
+.coo-chat .coo-conversation[data-empty="true"] { background-image: radial-gradient(var(--border) 0.65px, transparent 0.65px); background-size: 18px 18px; }
 .coo-chat .coo-conversation[data-empty="true"] > div { min-height: 100%; justify-content: center; }
-.coo-welcome-title { font-family: Georgia, "Times New Roman", serif; font-size: clamp(26px, 3vw, 36px); font-weight: 500; letter-spacing: -0.035em; line-height: 1.2; }
-.coo-chat #assistant-details { background: #f5f4f1; }
+.coo-welcome-title { font-family: "Instrument Serif", Georgia, serif; font-size: clamp(30px, 3vw, 40px); font-weight: 400; letter-spacing: -0.02em; line-height: 1.15; }
+.coo-chat #assistant-details { background: var(--background); }
 .coo-chat #assistant-details .group.relative { border-color: transparent; border-radius: 8px; box-shadow: none; }
-.coo-chat #assistant-details .group.relative:has([aria-current="page"]) { background: #eae7e0; border-left: 2px solid var(--primary); }
+.coo-chat #assistant-details .group.relative:has([aria-current="page"]) { background: var(--surface-muted); border-left: 2px solid var(--primary); }
 .coo-chat .coo-proposal { background: var(--surface); }
 .coo-chat article { overflow-wrap: anywhere; }
 .coo-chat header { background: var(--surface); }
-html[data-theme="dark"] .coo-chat { --border: #45443e; --surface: #20211d; --surface-muted: #2b2b25; }
-html[data-theme="dark"] .coo-chat #assistant-details { background: #1b1c18; }
-html[data-theme="dark"] .coo-chat #assistant-details .group.relative:has([aria-current="page"]) { background: #33342c; }
-html[data-theme="dark"] .coo-chat .coo-conversation[data-empty="true"] { background-image: radial-gradient(#44453e 0.65px, transparent 0.65px); }
 
 :root {
   color-scheme: light;
-  --background: #f4f1ec;
-  --foreground: #323026;
-  --surface: #fbfaf8;
-  --surface-muted: #e9e3dc;
-  --border: #cfc6bd;
-  --muted: #6c675c;
-  --primary: #675e3d;
-  --primary-strong: #514a30;
-  --primary-contrast: #ffffff;
-  --accent: #bbac97;
-  --accent-warm: #ded6cb;
+  --background: #f8fafc;
+  --foreground: #1e1e1e;
+  --surface: #ffffff;
+  --surface-muted: #f0f0f1;
+  --border: #d4d4d8;
+  --muted: #52525b;
+  --primary: #f97316;
+  --primary-strong: #ea580c;
+  --primary-contrast: #1e1e1e;
+  --accent: #ffedd5;
+  --accent-warm: #ffedd5;
   --success-surface: #e8f1eb;
   --success-foreground: #285f3c;
   --warning-surface: #fff7e6;
@@ -40,17 +38,17 @@ html[data-theme="dark"] .coo-chat .coo-conversation[data-empty="true"] { backgro
 
 html[data-theme="dark"] {
   color-scheme: dark;
-  --background: #171815;
-  --foreground: #eee9e2;
-  --surface: #20211d;
-  --surface-muted: #2b2b25;
-  --border: #4a473b;
-  --muted: #bbac97;
-  --primary: #bbac97;
-  --primary-strong: #cfc6bd;
-  --primary-contrast: #323026;
-  --accent: #675e3d;
-  --accent-warm: #372a1a;
+  --background: #1e1e1e;
+  --foreground: #f8fafc;
+  --surface: #27272a;
+  --surface-muted: #303034;
+  --border: #3f3f46;
+  --muted: #a1a1aa;
+  --primary: #f97316;
+  --primary-strong: #fb923c;
+  --primary-contrast: #1e1e1e;
+  --accent: #3d2b20;
+  --accent-warm: #3d2b20;
   --success-surface: #243229;
   --success-foreground: #b7d7bc;
   --warning-surface: #3a3020;
@@ -70,7 +68,7 @@ html[data-theme="dark"] {
   --color-primary-strong: var(--primary-strong);
   --color-accent: var(--accent);
   --color-accent-warm: var(--accent-warm);
-  --font-sans: "Aptos", "Segoe UI", Arial, sans-serif;
+  --font-sans: "Inter Variable", Inter, Arial, sans-serif;
   --font-mono: "Cascadia Code", Consolas, monospace;
 }
 
@@ -87,7 +85,7 @@ body {
   min-width: 320px;
   background: var(--background);
   color: var(--foreground);
-  font-family: "Aptos", "Segoe UI", Arial, sans-serif;
+  font-family: "Inter Variable", Inter, Arial, sans-serif;
 }
 
 /* Let product pages fit narrow viewports even with a visible scrollbar. */
@@ -102,9 +100,13 @@ a {
 }
 
 ::selection {
-  background: var(--accent);
-  color: var(--foreground);
+  background: var(--primary);
+  color: var(--primary-contrast);
 }
+
+button, input, textarea, select { font: inherit; }
+.bg-primary, [class~="bg-[#0b1320]"], [class~="bg-[#0b3156]"], [class~="bg-[#111a2a]"] { color: var(--primary-contrast) !important; }
+html:not([data-theme="dark"]) [class~="text-primary"] { color: #c2410c; }
 
 /* Reference palette bridge for legacy utility colors while screens are migrated to tokens. */
 [class~="bg-white"] { background-color: var(--surface); }
@@ -134,12 +136,13 @@ html[data-theme="dark"] [class~="bg-white/95"] { background-color: color-mix(in 
 html[data-theme="dark"] [class~="bg-white/65"] { background-color: color-mix(in srgb, var(--surface) 65%, transparent); }
 html[data-theme="dark"] [class~="bg-white/60"] { background-color: color-mix(in srgb, var(--surface) 60%, transparent); }
 html[data-theme="dark"] [class~="bg-white/45"] { background-color: color-mix(in srgb, var(--surface) 45%, transparent); }
-html[data-theme="dark"] [class~="bg-[#fafafa]"] { background-color: #1b1c18; }
+html[data-theme="dark"] [class~="bg-[#fafafa]"] { background-color: var(--surface); }
 html[data-theme="dark"] [class~="bg-[#edf2f8]"] { background-color: var(--accent-warm); }
 html[data-theme="dark"] [class~="bg-[#f8f7f4]"],
 html[data-theme="dark"] [class~="bg-[#f8faf7]"],
 html[data-theme="dark"] [class~="bg-[#f7f9f5]"],
 html[data-theme="dark"] [class~="bg-[#f8fafc]"],
+html[data-theme="dark"] [class~="bg-[#fbfcfd]"],
 html[data-theme="dark"] [class~="bg-[#fafbfd]"],
 html[data-theme="dark"] [class~="bg-[#f5f7fa]"],
 html[data-theme="dark"] [class~="bg-[#eeece8]"],

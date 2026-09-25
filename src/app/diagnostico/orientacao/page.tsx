@@ -83,7 +83,7 @@ export default async function DiagnosticGuidancePage({
             href="/dashboard"
             className="text-lg font-black tracking-[-0.04em] text-[#0b1320]"
           >
-            Fábrica Ágil
+            FÁBRICA <span className="text-primary">ÁGIL</span>
           </Link>
           <Link
             href="/diagnostico"

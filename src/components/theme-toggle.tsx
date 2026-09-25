@@ -19,7 +19,7 @@ function subscribe(callback: () => void) {
 }
 
 export function ThemeToggle({ compact = false }: { compact?: boolean }) {
-  const theme = useSyncExternalStore(subscribe, readTheme, () => "light");
+  const theme = useSyncExternalStore(subscribe, readTheme, () => "dark");
 
   function toggleTheme() {
     const next: Theme = theme === "light" ? "dark" : "light";

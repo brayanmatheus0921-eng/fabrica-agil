@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getAuthContext } from "@/server/auth";
 import { LoginForm } from "./login-form";
-import { Factory } from "lucide-react";
+import { BrandMark } from "@/components/brand-mark";
 import styles from "./login.module.css";
 
 export const metadata: Metadata = { title: "Entrar" };
@@ -13,12 +13,8 @@ export default async function LoginPage() {
   if (context) redirect(context.company.onboardingStatus === "COMPLETED" ? "/dashboard" : "/onboarding");
   return (
     <main className={styles.page}>
-      <Factory aria-hidden="true" className={styles.watermark} strokeWidth={0.8} />
       <div className={styles.content}>
-        <div className={styles.brand} aria-label="Fábrica Ágil">
-          <Factory aria-hidden="true" className={styles.brandIcon} />
-          <span>Fábrica Ágil</span>
-        </div>
+        <div className={styles.brand}><BrandMark /></div>
         <LoginForm />
       </div>
     </main>
