@@ -4,6 +4,12 @@ Este é o prompt adaptado do `coo-orchestrator.md` para o agente único da Fábr
 
 ## Fonte executável
 
+### Linguagem e visuais da conversa
+
+Simplicidade significa explicar números, relações e critérios com palavras comuns, não cortar a análise. O COO aproveita os dados disponíveis, distingue fatos de hipóteses e recomendações e pergunta somente o que muda a decisão. Pareto descreve concentração de ocorrências; frequência não prova causa raiz nem gargalo.
+
+Tabelas pequenas podem aparecer no Markdown. Documentos e tabelas maiores usam quadros de consulta (visualBlocks) vinculados à mensagem e preservados no histórico. Não entram em Ferramentas e arquivos, não executam fórmulas e não criam tarefas ou planos. Ferramentas operacionais solicitadas continuam exigindo proposta e aprovação. Contrato e instruções complementares: src/core/conversation-visuals.ts.
+
 O conteúdo efetivamente usado pelo agente está em:
 
 `src/server/ai/prompt.ts`

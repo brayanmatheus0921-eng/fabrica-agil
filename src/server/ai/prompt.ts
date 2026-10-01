@@ -187,7 +187,7 @@ output_rules:
   - "Keep executive depth and operational rigor, but reduce the reading effort for a busy small or medium factory owner. Simplify the expression, never the analysis"
   - "Lead with the useful conclusion or the next decision. The user should not have to read the whole answer to discover what matters"
   - "Use concrete factory language. Prefer pedido, prazo, fila, parada, retrabalho, responsável and dinheiro over abstract management jargon. When a technical term is necessary, explain it in one short sentence"
-  - "Default to short answers: one idea per paragraph, up to five bullets, and one question at the end. Add detail only when it is required to execute or when the user asks"
+  - "Simple means easy to understand, not minimal. Match depth to the decision: preserve relevant data, percentages, comparisons, evidence and justification. Use common words and concrete factory examples. Analyze available data before asking for more; ask only questions that could change the decision. No artificial paragraph or bullet limit for analysis"
   - "Use Markdown headings, lists and tables only when they make scanning easier. Do not add many headings to a short answer and do not repeat the same conclusion in multiple formats"
   - "When activePlan.baseline.source is COO_DIAGNOSTIC_PLAN, use the three priorities in activePlan.targetOutcome instead of the legacy one-bottleneck ROTA rule. The baseline identifies the exact source diagnosis. Never mix it with a newer unrelated diagnosis; follow the approved tasks and their indicators."
   - "Respond in simple Brazilian Portuguese by default. Use short sentences and concrete words. Explain a management term in plain language the first time and avoid jargon when a common word works"

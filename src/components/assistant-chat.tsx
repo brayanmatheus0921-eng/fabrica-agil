@@ -14,8 +14,10 @@ import { AssistantMarkdown } from "@/components/assistant-markdown";
 import { notifyCompanyDataChanged } from "@/components/company-data-sync";
 import { STAGE_LABELS, type WorkshopState } from "@/core/coo-workshop";
 import type { ArtifactView } from "@/core/workspace-artifacts";
+import { ConversationVisual } from "./conversation-visual";
+import { readConversationVisuals, type ConversationVisual as Visual } from "@/core/conversation-visuals";
 
-type Message = { id: string; role: string; content: string; proposalId?: string };
+type Message = { id: string; role: string; content: string; proposalId?: string; visualBlocks?: Visual[] };
 
 const desktopHistoryQuery = "(min-width: 1024px)";
 function subscribeDesktopHistory(callback: () => void) {
@@ -141,7 +143,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
           const event=JSON.parse(line);
           if(event.type==="activity")setActivity(event.text);
           if(event.type==="delta"){received+=event.text;setActivity("Respondendo…");flush();}
-          if(event.type==="done"){finished=true;setState(planningWorkspace ? event.state : null); if(event.memory)setMemory(event.memory);setProposalRefresh(v=>v+1);}
+          if(event.type==="done"){finished=true;flush();setMessages(old=>old.map(m=>m.id===assistantId?{...m,visualBlocks:readConversationVisuals({conversationVisuals:{version:1,blocks:event.visualBlocks}})}:m));setState(planningWorkspace ? event.state : null); if(event.memory)setMemory(event.memory);setProposalRefresh(v=>v+1);}
           if(event.type==="error"||event.type==="stopped"){finished=true;received="";setMessages(old=>old.filter(m=>m.id!==assistantId));setNotice(planningWorkspace ? "A aprovação foi salva. Continue com o planejador." : "A aprovação foi salva. Peça ao COO para continuar.");}
         }
       }
@@ -210,7 +212,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
           if (event.type === "ack") { ack = true; setActivity("Mensagem salva. Consultando o contexto…"); if(event.userId)setMessages(old=>old.map(m=>m.id===`user-${id}`?{...m,id:event.userId}:m)); if (event.threadId && event.threadId !== activeThreadIdRef.current) { activeThreadIdRef.current = event.threadId; setActiveThreadId(event.threadId); const url = new URL(window.location.href); url.searchParams.set("chat", event.threadId); url.searchParams.delete("pergunta"); window.history.replaceState(null, "", url); } }
           if (event.type === "activity") setActivity(event.text);
           if (event.type === "delta") { received += event.text; setActivity("Respondendo…"); if (!frame) frame = setTimeout(flush, 40); }
-          if (event.type === "done") { setProposalRefresh(v=>v+1); finished = true; setState(planningWorkspace ? event.state : null); if(event.memory)setMemory(event.memory); if (event.artifact) { setCanvasRefresh(v => v + 1); setOpenArtifactId(event.artifact.id); setCanvasPanel(true); setPanel(false); setNotice(event.artifact.operation === "REUSE" ? `Ferramenta reutilizada: ${event.artifact.title}` : event.artifact.operation === "REPLACE" ? `Ferramenta atualizada: ${event.artifact.title}` : `Ferramenta criada: ${event.artifact.title}`); } }
+          if (event.type === "done") { flush();setMessages(old=>old.map(m=>m.id===assistantId?{...m,visualBlocks:readConversationVisuals({conversationVisuals:{version:1,blocks:event.visualBlocks}})}:m));setProposalRefresh(v=>v+1); finished = true; setState(planningWorkspace ? event.state : null); if(event.memory)setMemory(event.memory); if (event.artifact) { setCanvasRefresh(v => v + 1); setOpenArtifactId(event.artifact.id); setCanvasPanel(true); setPanel(false); setNotice(event.artifact.operation === "REUSE" ? `Ferramenta reutilizada: ${event.artifact.title}` : event.artifact.operation === "REPLACE" ? `Ferramenta atualizada: ${event.artifact.title}` : `Ferramenta criada: ${event.artifact.title}`); } }
           if (event.type === "error" || event.type === "stopped") { finished = true; setNotice(event.text); }
         }
       }
@@ -258,7 +260,7 @@ export function AssistantChat({ messages: initialMessages, threads, currentThrea
       <div ref={scroll} data-empty={!messages.length} onScroll={() => { const node = scroll.current; if (node) { follow.current = node.scrollHeight - node.scrollTop - node.clientHeight < 90; setAway(!follow.current); } }} className="coo-conversation min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-7">
         <div className="mx-auto flex max-w-[700px] flex-col gap-5">
           {!messages.length ? <div className="coo-welcome min-w-0 py-8 text-center sm:py-10"><p className="coo-welcome-title">{planningWorkspace ? "Vamos construir seu plano" : "O que vamos fazer hoje?"}</p><p className="mt-2 text-[13px] text-muted">{planningWorkspace ? "Vou analisar o diagnóstico, sugerir caminhos e fazer uma pergunta por vez." : "Converse com seu COO. Da decisão à execução, com sua aprovação."}</p><div className="mx-auto mt-5 grid w-full min-w-0 max-w-[420px] gap-2 text-left">{suggestions.slice(0, 3).map((suggestion) => { const Icon = suggestion.kind === "task" ? ListChecks : suggestion.kind === "review" ? RefreshCw : Target; return <button key={`${suggestion.kind}-${suggestion.label}`} type="button" onClick={() => setDraft(suggestion.label)} className="group flex min-h-11 w-full min-w-0 items-center gap-3 rounded-xl border bg-surface px-3.5 py-2.5 text-[13px] leading-5 transition hover:border-primary/35 hover:bg-surface-muted sm:min-h-10 sm:py-2"><Icon className="size-4 shrink-0 text-primary" /><span className="min-w-0 flex-1 truncate">{suggestion.label}</span><ArrowUpRight className="size-3.5 shrink-0 text-muted transition group-hover:text-primary" /></button>; })}</div></div> : messages.map((m, index) => <div key={m.id} className="contents">
-            <article data-message-id={m.id} aria-label={m.role === "USER" ? "Sua mensagem" : "Resposta do consultor"} className={m.role === "USER" ? "ml-auto max-w-[90%] rounded-2xl bg-surface-muted px-4 py-3 text-sm leading-6" : "max-w-full text-sm leading-7"}><AssistantMarkdown text={m.content} /></article>
+            <article data-message-id={m.id} aria-label={m.role === "USER" ? "Sua mensagem" : "Resposta do consultor"} className={m.role === "USER" ? "ml-auto max-w-[90%] rounded-2xl bg-surface-muted px-4 py-3 text-sm leading-6" : "min-w-0 max-w-full text-sm leading-7"}><AssistantMarkdown text={m.content} />{!planningWorkspace && m.role === "ASSISTANT" ? m.visualBlocks?.map(visual => <ConversationVisual key={visual.id} visual={visual} />) : null}</article>
             {m.role==="ASSISTANT"&&m.proposalId?approvalArtifact(m):null}
             {m.role==="ASSISTANT"&&messages[index-1]?.role==="USER"?<AssistantProposals rows={proposals.filter(p=>p.sourceMessageId===messages[index-1].id)} busy={busy} onAdjust={onProposalAdjust} onApplied={onProposalApplied} onChanged={onProposalChanged} artifacts={artifacts} onOpenArtifact={onOpenArtifact} hideArtifactPreviewIds={approvalMessages}/>:null}
           </div>)}
