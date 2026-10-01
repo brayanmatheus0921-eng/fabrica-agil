@@ -3,6 +3,11 @@
 @import "@fontsource/instrument-serif/400.css";
 @import "@fontsource/instrument-serif/400-italic.css";
 
+@media (min-width: 64rem) {
+  html:has(.app-shell) { zoom: 0.8; }
+  .app-shell main:has(.coo-chat) { height: 125dvh; }
+}
+
 /* The brand palette is shared by every product surface. */
 .coo-chat .coo-conversation { background-color: var(--surface); }
 .coo-chat .coo-conversation[data-empty="true"] { background-image: radial-gradient(var(--border) 0.65px, transparent 0.65px); background-size: 18px 18px; }
