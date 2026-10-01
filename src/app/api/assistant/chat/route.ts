@@ -1,4 +1,5 @@
 import { requireAuth } from "@/server/auth";
+import { asDiagnosticRecord } from "@/core/diagnostic-history";
 import { Agent, run, tool } from "@openai/agents";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -26,7 +27,7 @@ import { CONVERSATION_VISUAL_INSTRUCTIONS, conversationVisualResponseSchema, con
 export const runtime = "nodejs";
 export const maxDuration = 180;
 const inputSchema = z.object({ threadId: z.string().min(1).max(200), workspace: z.enum(["PLAN", "COO"]).optional(), requestId: z.string().uuid(), message: z.string().trim().min(1).max(6000).optional(), resumeProposalId: z.string().min(1).max(200).optional() }).strict().refine(value => Boolean(value.message) !== Boolean(value.resumeProposalId));
-const advisoryResponseSchema = z.object({ reply: z.string().min(1), memory: memoryDraftSchema, visualBlocks: z.array(conversationVisualResponseSchema).nullable() });
+const advisoryResponseSchema = z.object({ reply: z.string().min(1), memory: memoryDraftSchema, visualBlocks: z.array(conversationVisualResponseSchema).nullable(), nextAction: z.string().nullable() });
 
 export async function POST(request: Request) {
   const auth = await requireAuth();
@@ -82,6 +83,7 @@ export async function POST(request: Request) {
     async start(output) {
       let text = "";
       let visualBlocks: ConversationVisual[] = [];
+      let nextAction: string | null = null;
       const emit = (event: object) => { try { output.enqueue(encoder.encode(JSON.stringify(event) + "\n")); } catch { controller.abort(); } };
       const heartbeat=setInterval(()=>emit({type:"ping"}),10000);
       try {
@@ -151,7 +153,7 @@ export async function POST(request: Request) {
         const scopedContext = current ? { company: context.company, selectedPlan, note: "Use exclusivamente o diagnóstico e a memória desta conversa de Plano. Não acesse conversas ou ferramentas do COO." } : context;
         const projects = current ? [] : await readSystem(prisma, auth.companyId, {area:"projects",query:"",projectId:null,recordId:null,offset:0});
         const visualHistory = thread.kind === "PLAN" ? [] : conversationVisualContext(history);
-        const input = JSON.stringify({ conversationVisuals: visualHistory, conversationMemory: previousMemory, resolvedConfirmation, currentPlan: current ? selectedPlan : context.activePlan, today: new Date().toLocaleDateString("sv-SE", {timeZone:"America/Sao_Paulo"}), cooMode: mode, projects, context: scopedContext, automaticProgress, artifacts: current ? [] : artifacts.map(a=>({...a, interpretation:a.confirmedAt?a.interpretation:null, notice:a.confirmedAt?"Leitura confirmada pelo usuário; não prova independente.":"Rascunho ou leitura pendente; não usar como resultado."})), workshop: current, diagnosis: diagnosis ? { id: diagnosis.id, title: diagnosis.title, matrix: snapshot, answers: diagnosis.answers.map(a => ({ code: a.question.code, question: a.question.prompt, value: a.value, notes: a.notes })) } : null, methods: catalog, messages: history.map(m => ({ id: m.id, role: m.role, content: m.content })), currentMessage: message ?? null, ...(resumeProposalId ? { continuation: "Aprovação confirmada pela plataforma. Informe o resultado e o próximo destino, sem novas ações." } : {}) });
+        const input = JSON.stringify({ conversationVisuals: visualHistory, conversationMemory: previousMemory, resolvedConfirmation, currentPlan: current ? selectedPlan : context.activePlan, today: new Date().toLocaleDateString("sv-SE", {timeZone:"America/Sao_Paulo"}), cooMode: mode, projects, context: scopedContext, automaticProgress, artifacts: current ? [] : artifacts.map(a=>({...a, interpretation:a.confirmedAt?a.interpretation:null, notice:a.confirmedAt?"Leitura confirmada pelo usuário; não prova independente.":"Rascunho ou leitura pendente; não usar como resultado."})), workshop: current, diagnosis: diagnosis ? { id: diagnosis.id, title: diagnosis.title, matrix: snapshot, answers: diagnosis.answers.map(a => ({ code: a.question.code, question: a.question.prompt, value: a.value, notes: a.notes })) } : null, methods: catalog, messages: history.map(m => ({ id: m.id, role: m.role, content: m.content, nextAction: typeof asDiagnosticRecord(m.metadata).nextAction === "string" ? asDiagnosticRecord(m.metadata).nextAction : null })), currentMessage: message ?? null, ...(resumeProposalId ? { continuation: "Aprovação confirmada pela plataforma. Informe o resultado e o próximo destino, sem novas ações." } : {}) });
         emit({ type: "activity", text: "Preparando uma resposta e o próximo passo…" });
         if(resumeExecution){
           text="Plano aprovado e tarefas liberadas. Você pode [acompanhar o plano](/plano-de-acao) ou seguir para [o chat geral do COO](/assistente) para executar, registrar resultados e ajustar o trabalho com sua aprovação.";
@@ -198,11 +200,12 @@ export async function POST(request: Request) {
           if(!asksBareApproval&&!falseTargetFailure){
             text=candidate;
             if (thread.kind === "COO") {
+              nextAction = answer.nextAction?.trim() || null;
               const visuals = conversationVisualsSchema.safeParse(answer.visualBlocks ?? []);
               if (visuals.success) { visualBlocks = visuals.data; text = removeRepeatedVisualTables(text, visualBlocks); }
               else text += "\n\nNão foi possível exibir o quadro completo com segurança. Peça uma versão menor ou a revisão dos dados; nenhum quadro incompleto foi salvo.";
             }
-            nextMemory=acceptMemory(answer.memory,candidate);break;
+            nextMemory=acceptMemory(answer.memory,[candidate,nextAction].filter(Boolean).join("\n\n"));break;
           }
           if(attempt===2)throw new Error("O COO não conseguiu preparar uma proposta segura.");
           correction=falseTargetFailure?`\nA tarefa foi identificada inequivocamente pelo servidor: ID ${referencedTask!.id}, título “${referencedTask!.title}”. Use esse ID real e chame a ferramenta de proposta agora. Não peça ID nem nome ao gestor.`:"\nSua resposta anterior pediu autorização sem criar o cartão. Consulte o ID real já presente em context.activePlan e chame a ferramenta de proposta nesta resposta. Não termine com 'Posso...?' sem uma proposta validada.";
@@ -224,11 +227,11 @@ export async function POST(request: Request) {
           nextMemory = readConversationMemory(nextMemory, thread.kind, { fallback: previousMemory, workshop: nextWorkshop });
           await tx.conversationThread.update({ where: { id: threadId }, data: { conversationMemory: nextMemory as never, ...(nextWorkshop ? { workflowState: nextWorkshop as never } : {}) } });
           const proposal = actionDraft && proposalSourceId ? await proposeAction(tx, auth, threadId, proposalSourceId, actionDraft) : null;
-          await tx.conversationMessage.create({ data: { id: assistantId, threadId, role: "ASSISTANT", content: text, metadata: { requestId, ...(visualBlocks.length ? { conversationVisuals: { version: 1, blocks: visualBlocks } } : {}), ...(resumeProposalId ? { continuationForProposalId: resumeProposalId } : {}) } } });
+          await tx.conversationMessage.create({ data: { id: assistantId, threadId, role: "ASSISTANT", content: text, metadata: { requestId, ...(nextAction ? { nextAction } : {}), ...(visualBlocks.length ? { conversationVisuals: { version: 1, blocks: visualBlocks } } : {}), ...(resumeProposalId ? { continuationForProposalId: resumeProposalId } : {}) } } });
           await tx.conversationThread.update({ where: { id: threadId }, data: { lastMessageAt: new Date(), generationId: null, generationStartedAt: null,  } });
           return { state: nextWorkshop, memory: nextMemory, proposal: proposal ? proposalView(proposal) : null };
         });
-        emit({ type: "done", state: saved.state, memory: saved.memory, proposal: saved.proposal, visualBlocks });
+        emit({ type: "done", state: saved.state, memory: saved.memory, proposal: saved.proposal, visualBlocks, nextAction });
       } catch (error) {
         const interrupted = controller.signal.aborted;
         console.error("COO chat:", interrupted ? "interrupted" : error instanceof Error ? `${error.name}: ${error.message}` : "failed");
